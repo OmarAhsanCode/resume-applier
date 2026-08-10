@@ -67,9 +67,9 @@
                 </td>
                 <td class="cell-actions">
                     <div class="action-buttons">
-                        <button onclick="updateJobStatus({{ job.id }}, 'applied')" class="btn-icon btn-mark-applied {% if job.status == 'applied' %}active{% endif %}" title="Mark Applied">✓ Applied</button>
-                        <button onclick="updateJobStatus({{ job.id }}, 'saved')" class="btn-icon btn-mark-saved {% if job.status == 'saved' %}active{% endif %}" title="Save for later">★ Save</button>
-                        <button onclick="updateJobStatus({{ job.id }}, 'rejected')" class="btn-icon btn-mark-rejected {% if job.status == 'rejected' %}active{% endif %}" title="Reject">✕ Reject</button>
+                        <button onclick="updateJobStatus('{{ job.id }}', 'applied')" class="btn-icon btn-mark-applied {% if job.status == 'applied' %}active{% endif %}" title="Mark Applied">✓ Applied</button>
+                        <button onclick="updateJobStatus('{{ job.id }}', 'saved')" class="btn-icon btn-mark-saved {% if job.status == 'saved' %}active{% endif %}" title="Save for later">★ Save</button>
+                        <button onclick="updateJobStatus('{{ job.id }}', 'rejected')" class="btn-icon btn-mark-rejected {% if job.status == 'rejected' %}active{% endif %}" title="Reject">✕ Reject</button>
                     </div>
                 </td>
             </tr>
