@@ -1,0 +1,28 @@
+# Secrets and Local Environment
+.env
+*.db
+credentials.json
+token.json
+
+# User Uploads and Generated Assets
+uploads/
+generated/
+data/
+
+# Python Cache & Bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+venv/
+env/
+
+# LaTeX compilation artifacts
+*.aux
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
