@@ -225,7 +225,18 @@ def run_job_search_pipeline(
         if not valid_candidate_jobs:
             msg = "No new matching jobs discovered."
             database.update_run_progress(run_id, status="completed", selected_count=0, db_path=db_path)
-            return {"status": "completed", "selected_count": 0, "message": msg}
+            return {
+                "status": "completed",
+                "run_id": run_id,
+                "discovered_count": discovered_count,
+                "duplicate_count": duplicate_count,
+                "filtered_count": filtered_count,
+                "analyzed_count": 0,
+                "selected_count": 0,
+                "resume_success_count": 0,
+                "resume_error_count": 0,
+                "message": msg
+            }
 
         # Step 4: Sort by deterministic score and pick top pool for AI analysis
         valid_candidate_jobs.sort(key=lambda j: j["deterministic_score"], reverse=True)

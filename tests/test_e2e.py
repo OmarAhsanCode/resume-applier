@@ -1,10 +1,47 @@
 import os
 import unittest
 import tempfile
+from unittest.mock import patch
 import database
 import ai
 import jobs
-import resume
+import sources
+
+MOCK_DISCOVERED_JOBS = [
+    {
+        "source": "greenhouse",
+        "source_job_id": "1001",
+        "unique_id": "greenhouse:1001",
+        "company": "Acme Inc",
+        "title": "Junior Python Engineer",
+        "location": "Remote",
+        "employment_type": "Full-time",
+        "description": "Looking for a Python developer with SQL and Flask experience.",
+        "application_url": "https://boards.greenhouse.io/acme/jobs/1001"
+    },
+    {
+        "source": "lever",
+        "source_job_id": "1002",
+        "unique_id": "lever:1002",
+        "company": "Tech Corp",
+        "title": "Software Engineer Intern",
+        "location": "Hyderabad",
+        "employment_type": "Internship",
+        "description": "Software engineering internship working with Python, C++, and Docker.",
+        "application_url": "https://jobs.lever.co/techcorp/1002"
+    },
+    {
+        "source": "ashby",
+        "source_job_id": "1003",
+        "unique_id": "ashby:1003",
+        "company": "DataWorks",
+        "title": "AI/ML Engineer",
+        "location": "Remote",
+        "employment_type": "Full-time",
+        "description": "Machine learning engineer role using PyTorch, Python, and SQL.",
+        "application_url": "https://jobs.ashbyhq.com/dataworks/1003"
+    }
+]
 
 class TestEndToEnd(unittest.TestCase):
     def setUp(self):
@@ -17,7 +54,10 @@ class TestEndToEnd(unittest.TestCase):
         if os.path.exists(self.db_path):
             os.remove(self.db_path)
 
-    def test_full_e2e_workflow(self):
+    @patch('sources.discover_all_sources')
+    def test_full_e2e_workflow(self, mock_discover):
+        mock_discover.return_value = MOCK_DISCOVERED_JOBS
+
         # 1. Candidate Setup
         sample_cv = """
         Alex Johnson
@@ -28,11 +68,6 @@ class TestEndToEnd(unittest.TestCase):
         
         Skills:
         Python, Java, SQL, Flask, Git, Machine Learning, Docker
-        
-        Experience:
-        Software Engineering Intern at Cloud Systems (2025-05 to 2025-08)
-        - Developed Python microservices using Flask and PostgreSQL.
-        - Wrote automated test scripts in pytest.
         """
         profile = ai.parse_resume(sample_cv)
         database.save_candidate("Alex Johnson", "alex.johnson@example.com", "+1 555-0199", profile, db_path=self.db_path)
@@ -48,14 +83,14 @@ class TestEndToEnd(unittest.TestCase):
             "work_modes": ["remote", "hybrid"],
             "experience_levels": ["entry_level", "internship"],
             "jobs_per_run": 5,
-            "dream_companies": ["Google", "Microsoft"]
+            "dream_companies": ["Acme Inc", "DataWorks"]
         }
         database.save_preferences(prefs, db_path=self.db_path)
 
         # 3. Simulate Pipeline Run 1
         res1 = jobs.run_job_search_pipeline(requested_jobs=5, db_path=self.db_path)
         self.assertIn(res1["status"], ["completed", "partial"])
-        self.assertTrue(res1["discovered_count"] > 0)
+        self.assertEqual(res1["discovered_count"], 3)
         self.assertTrue(res1["selected_count"] > 0)
 
         first_selected_jobs = database.get_all_jobs(status_filter="selected", db_path=self.db_path)
@@ -72,8 +107,9 @@ class TestEndToEnd(unittest.TestCase):
 
         # 4. Simulate Pipeline Run 2 (Deduplication Check)
         res2 = jobs.run_job_search_pipeline(requested_jobs=5, db_path=self.db_path)
-        self.assertIn(res2["status"], ["completed", "partial"])
-        self.assertTrue(res2["duplicate_count"] > 0) # Previously seen jobs must be deduplicated!
+        self.assertEqual(res2["status"], "completed")
+        self.assertEqual(res2["discovered_count"], 3)
+        self.assertEqual(res2["duplicate_count"], 3) # All 3 jobs deduplicated!
 
 if __name__ == "__main__":
     unittest.main()
