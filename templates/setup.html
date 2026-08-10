@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Master CV - Personal Job Automator{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>One-Time Setup: Upload Master CV</h1>
+    <p>Upload your current master resume PDF. The system will extract factual details using AI and store your structured profile.</p>
+</div>
+
+<div class="card form-card center-card">
+    <form action="{{ url_for('setup') }}" method="POST" enctype="multipart/form-data">
+        <div class="file-upload-zone">
+            <input type="file" id="master_cv" name="master_cv" accept=".pdf" required class="file-input">
+            <label for="master_cv" class="file-label">
+                <span class="upload-icon">📄</span>
+                <span class="upload-text">Click to choose Master CV (PDF)</span>
+            </label>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary btn-large">Parse CV & Create Profile</button>
+        </div>
+    </form>
+</div>
+
+{% if candidate %}
+<div class="card info-card">
+    <h3>Currently Stored Profile</h3>
+    <p><strong>Name:</strong> {{ candidate.name }}</p>
+    <p><strong>Email:</strong> {{ candidate.email }}</p>
+    <p><strong>Last Updated:</strong> {{ candidate.updated_at[:19].replace('T', ' ') }}</p>
+    <a href="{{ url_for('profile') }}" class="btn btn-secondary">Review & Edit Profile →</a>
+</div>
+{% endif %}
+{% endblock %}

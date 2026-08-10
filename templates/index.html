@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Personal Job Automator{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <h1>Personal Job Automator</h1>
+    <p class="subtitle">Automated job discovery, deterministic ranking, semantic AI matching & LaTeX resume tailoring.</p>
+</div>
+
+<div class="grid-layout">
+    <!-- Setup Status Card -->
+    <div class="card status-card">
+        <h2>System Readiness</h2>
+        <div class="status-list">
+            <div class="status-item">
+                <span class="status-label">Master Candidate Profile</span>
+                {% if candidate %}
+                    <span class="badge badge-success">✓ Loaded ({{ candidate.name }})</span>
+                {% else %}
+                    <span class="badge badge-warning">⚠ Not Setup</span>
+                {% endif %}
+            </div>
+
+            <div class="status-item">
+                <span class="status-label">Master CV Document</span>
+                {% if candidate and candidate.master_resume_path %}
+                    <span class="badge badge-success">✓ Uploaded</span>
+                {% else %}
+                    <span class="badge badge-warning">⚠ Missing</span>
+                {% endif %}
+            </div>
+
+            <div class="status-item">
+                <span class="status-label">Job Search Preferences</span>
+                {% if preferences %}
+                    <span class="badge badge-success">✓ Configured ({{ preferences.preferred_roles|length }} Roles)</span>
+                {% else %}
+                    <span class="badge badge-warning">⚠ Default Settings</span>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if not candidate %}
+            <div class="action-banner">
+                <p>Welcome! Start by uploading your Master CV PDF.</p>
+                <a href="{{ url_for('setup') }}" class="btn btn-primary">Start One-Time Setup</a>
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- Job Search Launcher Form -->
+    <div class="card launcher-card">
+        <h2>Find Jobs</h2>
+        <p>Trigger a search across Greenhouse, Lever, and Ashby. Deduplicates and generates tailored LaTeX resumes automatically.</p>
+        
+        <form id="find-jobs-form" action="{{ url_for('trigger_run') }}" method="POST">
+            <div class="form-group">
+                <label for="jobs_count">Number of target jobs to find:</label>
+                <input type="number" id="jobs_count" name="jobs_count" value="{{ preferences.jobs_per_run if preferences else 50 }}" min="1" max="200" class="form-input">
+            </div>
+
+            <button type="submit" id="btn-find-jobs" class="btn btn-action btn-large" {% if not candidate %}disabled{% endif %}>
+                🚀 FIND JOBS
+            </button>
+        </form>
+    </div>
+</div>
+
+<!-- Progress Polling Box -->
+<div id="progress-container" class="card progress-card {% if current_progress.status == 'running' %}active{% else %}hidden{% endif %}">
+    <div class="progress-header">
+        <div class="spinner"></div>
+        <h3 id="progress-stage">{{ current_progress.stage }}</h3>
+    </div>
+    <p id="progress-details">{{ current_progress.details }}</p>
+    <div class="progress-bar-bg">
+        <div id="progress-bar-fill" class="progress-bar-fill" style="width: 50%;"></div>
+    </div>
+</div>
+
+<!-- Last Run Summary Card -->
+<div class="card history-card">
+    <h2>Last Run Summary</h2>
+    {% if latest_run %}
+        <div class="stats-grid">
+            <div class="stat-box">
+                <span class="stat-number">{{ latest_run.discovered_count }}</span>
+                <span class="stat-label">Discovered</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-number">{{ latest_run.duplicate_count }}</span>
+                <span class="stat-label">Duplicates Skipped</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-number">{{ latest_run.selected_count }}</span>
+                <span class="stat-label">Top Selected</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-number">{{ latest_run.resume_success_count }}</span>
+                <span class="stat-label">Resumes Created</span>
+            </div>
+        </div>
+        <div class="run-meta">
+            <span>Started: {{ latest_run.started_at[:19].replace('T', ' ') }}</span>
+            <span>Status: <strong class="badge badge-info">{{ latest_run.status }}</strong></span>
+            <a href="{{ url_for('results') }}" class="btn btn-secondary btn-sm">View Results →</a>
+        </div>
+    {% else %}
+        <p class="empty-state">No job runs executed yet. Click <strong>FIND JOBS</strong> above to begin your first automated run.</p>
+    {% endif %}
+</div>
+{% endblock %}

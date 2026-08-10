@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Resume Settings - Personal Job Automator{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Resume Layout & Settings</h1>
+    <p>Configure section layout order and instructions for LaTeX resume rendering.</p>
+</div>
+
+<div class="card form-card">
+    <form action="{{ url_for('resume_settings_route') }}" method="POST">
+        <div class="form-group">
+            <label for="template">Resume Template Choice</label>
+            <select id="template" name="template" class="form-input">
+                <option value="ats" {% if settings.template == 'ats' %}selected{% endif %}>ATS-Optimized Single Page (Default)</option>
+                <option value="modern" {% if settings.template == 'modern' %}selected{% endif %}>Modern Clean LaTeX</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="section_order">Section Display Order (comma-separated)</label>
+            <input type="text" id="section_order" name="section_order" value="{{ settings.section_order|join(', ') }}" class="form-input">
+            <small class="help-text">Available sections: summary, education, experience, projects, skills, certifications</small>
+        </div>
+
+        <div class="form-group">
+            <label for="resume_length">Target Resume Page Length</label>
+            <input type="number" id="resume_length" name="resume_length" value="{{ settings.resume_length }}" min="1" max="2" class="form-input">
+        </div>
+
+        <div class="form-group">
+            <label for="instructions">Custom Tailoring Instructions for AI</label>
+            <textarea id="instructions" name="instructions" rows="3" class="form-textarea" placeholder="e.g. Prioritize backend projects over frontend ones.">{{ settings.instructions or '' }}</textarea>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary btn-large">Save Resume Settings</button>
+            <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Dashboard</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

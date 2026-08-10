@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Review Candidate Profile - Personal Job Automator{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Candidate Profile Verification</h1>
+    <p>Review and correct the structured candidate details extracted from your Master CV. This profile is your <strong>factual source of truth</strong>.</p>
+</div>
+
+<div class="card form-card">
+    <form action="{{ url_for('profile') }}" method="POST">
+        <div class="form-row">
+            <div class="form-group flex-1">
+                <label for="name">Full Name</label>
+                <input type="text" id="name" name="name" value="{{ candidate.name if candidate else '' }}" required class="form-input">
+            </div>
+
+            <div class="form-group flex-1">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" name="email" value="{{ candidate.email if candidate else '' }}" required class="form-input">
+            </div>
+
+            <div class="form-group flex-1">
+                <label for="phone">Phone Number</label>
+                <input type="text" id="phone" name="phone" value="{{ candidate.phone if candidate else '' }}" class="form-input">
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group flex-1">
+                <label for="linkedin">LinkedIn Profile URL</label>
+                <input type="url" id="linkedin" name="linkedin" value="{{ candidate.profile.links.linkedin if candidate and candidate.profile.links else '' }}" class="form-input">
+            </div>
+
+            <div class="form-group flex-1">
+                <label for="github">GitHub Profile URL</label>
+                <input type="url" id="github" name="github" value="{{ candidate.profile.links.github if candidate and candidate.profile.links else '' }}" class="form-input">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="skills">Technical Skills (comma-separated)</label>
+            <input type="text" id="skills" name="skills" value="{{ candidate.profile.skills|join(', ') if candidate and candidate.profile.skills else '' }}" class="form-input">
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary btn-large">Save Profile</button>
+            <a href="{{ url_for('preferences_route') }}" class="btn btn-secondary">Next: Job Preferences →</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
