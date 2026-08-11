@@ -32,7 +32,7 @@ def discover_jobs(search_config: Dict[str, Any] = None) -> List[Dict[str, Any]]:
                     job_id = str(item.get("id", ""))
                     title = item.get("title", "")
                     location = item.get("locationName", "Remote")
-                    emp_type = item.get("employmentType", "Full-time")
+                    emp_type = item.get("employmentType")
                     app_url = item.get("jobUrl", f"https://jobs.ashbyhq.com/{comp}/{job_id}")
                     
                     description = item.get("descriptionHtml", "") or item.get("descriptionPlain", "")

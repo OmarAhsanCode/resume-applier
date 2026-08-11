@@ -14,13 +14,41 @@ logger = logging.getLogger(__name__)
 # 1. Conservative Hard Filtering
 # ---------------------------------------------------------------------------
 
+SENIOR_PATTERNS = [
+    r"\bsenior\b", r"\bsr\.?\b", r"\bstaff\b", r"\bprincipal\b", r"\blead\b",
+    r"\bmanager\b", r"\bdirector\b", r"\bhead\b", r"\barchitect\b", r"\bdistinguished\b",
+    r"\bvp\b", r"\bvice\s+president\b", r"\bchief\b"
+]
+
+INTERN_PATTERNS = [
+    r"\bintern\b", r"\binternship\b", r"\bco-op\b", r"\bcoop\b",
+    r"\bsummer intern\b", r"\bstudent intern\b", r"\bgraduate intern\b"
+]
+
+ENTRY_PATTERNS = [
+    r"\bentry\s*-?\s*level\b", r"\bjunior\b", r"\bjr\.?\b", r"\bnew\s*-?\s*grad\b",
+    r"\bgraduate\b", r"\bassociate\b", r"\bearly\s*-?\s*career\b"
+]
+
+def has_pattern(text: str, patterns: list) -> bool:
+    text_lower = (text or "").lower()
+    return any(re.search(pat, text_lower) for pat in patterns)
+
+def extract_core_role(role_text: str) -> str:
+    """Removes experience-level keywords to extract the core role string."""
+    clean = (role_text or "").lower()
+    for pat in SENIOR_PATTERNS + INTERN_PATTERNS + ENTRY_PATTERNS:
+        clean = re.sub(pat, "", clean)
+    return re.sub(r"\s+", " ", clean).strip()
+
 def is_hard_filtered(job: Dict[str, Any], preferences: Dict[str, Any], candidate_profile: Dict[str, Any]) -> Tuple[bool, str]:
     """
     Evaluates whether a job should be HARD FILTERED (rejected immediately).
     RECALL IS MORE IMPORTANT THAN PRECISION.
     Hard-filter ONLY obvious mismatches:
     - Wrong profession / completely unrelated role
-    - Excessive incompatible experience requirement
+    - Incompatible senior experience level when user requested internship/entry-level only
+    - Explicit employment type mismatch (e.g. Full-time position when user requested Internship only)
     - Impossible location requirement
     Missing skills must NEVER trigger a hard filter.
     """
@@ -34,27 +62,70 @@ def is_hard_filtered(job: Dict[str, Any], preferences: Dict[str, Any], candidate
     pref_exp_levels = [e.lower() for e in preferences.get("experience_levels", [])]
 
     # Rule 1: Obvious profession mismatch
-    # If candidate wants software/tech roles, reject non-tech/unrelated professions
     unrelated_keywords = ["registered nurse", "cashier", "truck driver", "store manager", "customer service representative", "medical assistant", "dental hygienist"]
     if any(ukw in title for ukw in unrelated_keywords):
         return True, f"Role profession mismatch: '{title}'"
 
-    # Rule 2: Extreme experience gap
-    # If candidate is looking for internship/entry level, filter out 8+ years executive/VP positions
-    if any(lvl in pref_exp_levels for lvl in ["internship", "entry_level", "entry level", "junior"]):
-        high_exp_patterns = [r"\b8\+\s*years", r"\b10\+\s*years", r"\b15\+\s*years", r"vp of", r"vice president", r"chief tech", r"director of"]
+    # Rule 2: Strict Experience Level & Seniority & Employment Type Matching
+    wants_internship = any(lvl in pref_exp_levels for lvl in ["internship", "intern", "co-op"])
+    wants_entry = any(lvl in pref_exp_levels for lvl in ["entry_level", "entry level", "junior", "new grad"])
+    wants_mid = any(lvl in pref_exp_levels for lvl in ["mid_level", "mid level", "mid", "intermediate"])
+    wants_senior = any(lvl in pref_exp_levels for lvl in ["senior", "senior_level", "senior level", "executive", "lead", "staff", "principal"])
+
+    has_intern_title = has_pattern(title, INTERN_PATTERNS)
+    has_entry_title = has_pattern(title, ENTRY_PATTERNS)
+    has_senior_title = has_pattern(title, SENIOR_PATTERNS)
+
+    # 2a. Senior title check: If user wants Internship or Entry Level and NOT Mid/Senior Level
+    if (wants_internship or wants_entry) and not (wants_mid or wants_senior):
+        if has_senior_title:
+            return True, f"Senior experience mismatch: '{title}'"
+        
+        # High experience requirements in title/description (e.g. 8+ years)
+        high_exp_patterns = [r"\b8\+\s*years", r"\b10\+\s*years", r"\b15\+\s*years"]
         for pat in high_exp_patterns:
             if re.search(pat, title) or re.search(pat, description[:500]):
                 return True, f"Extreme experience requirement mismatch: '{title}'"
 
-    # Rule 3: Impossible location mismatch
-    # If user specifies restricted locations and job requires onsite work in incompatible region
+    # 2b. Explicit Employment Type Mismatch:
+    is_explicit_fulltime = (emp_type == "full_time" or "full-time" in emp_type or "fulltime" in emp_type)
+
+    if not (wants_mid or wants_senior):
+        if wants_internship and not wants_entry:
+            # User wants Internship ONLY: Explicit full-time role MUST be rejected unless title is an Intern role
+            if is_explicit_fulltime and not has_intern_title:
+                return True, f"Full-time employment type mismatch for internship-only preference: '{title}'"
+        
+        if wants_internship or wants_entry:
+            # User wants Internship + Entry Level (or Entry Level only):
+            # An explicit full-time role with NO intern title AND NO entry-level title is a standard regular/mid-level position!
+            if is_explicit_fulltime and not has_intern_title and not has_entry_title:
+                return True, f"Explicit full-time non-entry-level role mismatch: '{title}'"
+
+    # Rule 3: Location mismatch (conservative)
     if pref_locations:
         is_remote_job = "remote" in location or "remote" in title or "work from home" in description[:300]
         location_matched = is_remote_job or any(pl in location for pl in pref_locations if pl != "remote")
-        # If strict onsite location specified that contradicts all user choices
         if not location_matched and "onsite" in location and not any(loc in location for loc in ["india", "us", "usa", "anywhere"]):
-            pass # Keep conservative: log but pass unless clearly impossible
+            pass
+
+    # Rule 4: Salary Hard Filter
+    from sources.base import normalize_salary
+    raw_salary = job.get("salary") or (job.get("ai_analysis") or {}).get("extracted_salary")
+    monthly_inr, display_sal = normalize_salary(raw_salary, description[:1000])
+    job["normalized_salary"] = display_sal
+    job["monthly_salary_inr"] = monthly_inr
+
+    min_salary = preferences.get("minimum_salary")
+    include_undisclosed = preferences.get("include_undisclosed_salary", True)
+
+    if min_salary and isinstance(min_salary, (int, float)) and min_salary > 0:
+        if monthly_inr is not None:
+            if monthly_inr < min_salary:
+                return True, f"Salary below minimum threshold: ₹{monthly_inr:,}/month < ₹{min_salary:,}/month"
+        elif display_sal == "Not disclosed":
+            if not include_undisclosed:
+                return True, f"Salary not disclosed (undisclosed compensation disabled)"
 
     return False, ""
 
@@ -70,7 +141,7 @@ def calculate_deterministic_score(candidate_profile: Dict[str, Any], preferences
     - Experience alignment: 20%
     - Employment type: 10%
     - Skill overlap: 10%
-    - Dream company bonus: +5-10 pts (capped at 100)
+    - Dream company bonus: +8 pts (capped at 100)
     """
     title = (job.get("title") or "").lower()
     description = (job.get("description") or "").lower()
@@ -78,18 +149,20 @@ def calculate_deterministic_score(candidate_profile: Dict[str, Any], preferences
     emp_type = (job.get("employment_type") or "").lower()
     company = (job.get("company") or "").lower()
 
-    # 1. Role Alignment (35 pts)
+    # 1. Role Alignment (35 pts) - Compare core roles separately from experience words
     pref_roles = [r.lower() for r in preferences.get("preferred_roles", [])]
     role_score = 0.0
     if pref_roles:
+        job_core_role = extract_core_role(title)
         for r in pref_roles:
-            if r in title:
+            pref_core_role = extract_core_role(r)
+            if pref_core_role and pref_core_role in job_core_role:
                 role_score = 35.0
                 break
-            elif any(word in title for word in r.split() if len(word) > 3):
+            elif any(word in job_core_role for word in pref_core_role.split() if len(word) > 3):
                 role_score = max(role_score, 25.0)
         if role_score == 0.0:
-            role_score = 15.0 # Baseline for passing hard filter
+            role_score = 15.0
     else:
         role_score = 25.0
 
@@ -110,9 +183,19 @@ def calculate_deterministic_score(candidate_profile: Dict[str, Any], preferences
 
     # 3. Experience Alignment (20 pts)
     pref_exp = [e.lower() for e in preferences.get("experience_levels", [])]
-    exp_score = 15.0
-    if any(e in title or e in description[:500] for e in pref_exp):
+    wants_intern = any(e in pref_exp for e in ["internship", "intern", "co-op"])
+    wants_entry = any(e in pref_exp for e in ["entry_level", "entry level", "junior"])
+    
+    is_job_intern = has_pattern(title, INTERN_PATTERNS) or "internship" in emp_type
+    is_job_entry = has_pattern(title, ENTRY_PATTERNS)
+
+    if (wants_intern and is_job_intern) or (wants_entry and is_job_entry):
         exp_score = 20.0
+    elif (wants_intern or wants_entry) and not is_job_intern and not is_job_entry:
+        # Unknown / unlabelled experience level: keep but penalize slightly
+        exp_score = 10.0
+    else:
+        exp_score = 15.0
 
     # 4. Employment Type (10 pts)
     pref_modes = [m.lower() for m in preferences.get("work_modes", [])]
@@ -127,7 +210,7 @@ def calculate_deterministic_score(candidate_profile: Dict[str, Any], preferences
 
     total_score = role_score + location_score + exp_score + emp_score + skill_score
 
-    # Dream Company Bonus (+5 to +10 pts)
+    # Dream Company Bonus (+8 pts)
     dream_companies = [c.lower() for c in preferences.get("dream_companies", [])]
     if any(dc in company for dc in dream_companies if dc):
         total_score += 8.0
@@ -240,7 +323,7 @@ def run_job_search_pipeline(
 
         # Step 4: Sort by deterministic score and pick top pool for AI analysis
         valid_candidate_jobs.sort(key=lambda j: j["deterministic_score"], reverse=True)
-        ai_pool_size = min(len(valid_candidate_jobs), max(requested_jobs * 2, 10))
+        ai_pool_size = min(len(valid_candidate_jobs), max(requested_jobs * 2, 5))
         ai_candidate_pool = valid_candidate_jobs[:ai_pool_size]
 
         # Step 5: AI Job Deep Analysis
@@ -260,7 +343,6 @@ def run_job_search_pipeline(
                 job["ai_score"] = ai_score
                 job["final_score"] = final_score
                 job["ai_analysis"] = analysis
-
                 database.update_job_evaluation(
                     job_id=job["id"],
                     deterministic_score=job["deterministic_score"],
@@ -275,25 +357,12 @@ def run_job_search_pipeline(
                 time.sleep(3)
             except Exception as e:
                 logger.error(f"Error during AI analysis for job #{job['id']} ({job['title']}) at {job['company']}: {e}")
-                try:
-                    database.delete_job_by_id(job["id"], db_path=db_path)
-                except Exception as del_err:
-                    logger.error(f"Error deleting failed job #{job['id']}: {del_err}")
 
         report_progress("AI Analysis", f"AI Analysis completed for {analyzed_count} jobs.", {"analyzed_count": analyzed_count})
 
-        # Step 6: Select Top N jobs (with a max of 2 jobs per company for diversity)
+        # Step 6: Select Top N jobs
         scored_jobs.sort(key=lambda j: j["final_score"], reverse=True)
-        selected_jobs = []
-        company_counts = {}
-        for job in scored_jobs:
-            if len(selected_jobs) >= requested_jobs:
-                break
-            comp = job.get("company", "").strip().lower()
-            if company_counts.get(comp, 0) < 2:
-                selected_jobs.append(job)
-                company_counts[comp] = company_counts.get(comp, 0) + 1
-                
+        selected_jobs = scored_jobs[:requested_jobs]
         selected_count = len(selected_jobs)
 
         for s_job in selected_jobs:
@@ -301,63 +370,36 @@ def run_job_search_pipeline(
 
         report_progress("Selection", f"Selected top {selected_count} jobs.", {"selected_count": selected_count})
 
-        # Step 7: Resume Tailoring, LaTeX Rendering & PDF Compilation
-        report_progress("Resume Generation", f"Tailoring resumes for top {selected_count} jobs...")
-        resume_success_count = 0
-        resume_error_count = 0
-        google_service.initialize_google_drive()
-
-        for idx, s_job in enumerate(selected_jobs, 1):
-            report_progress("Resume Generation", f"Generating resume {idx}/{selected_count} for {s_job['company']}...")
-            try:
-                tailored_res = ai.tailor_resume(profile, s_job, s_job["ai_analysis"], resume_settings)
-                latex_code = resume.render_latex(tailored_res)
-
-                sanitized_comp = resume.sanitize_filename(s_job["company"])
-                sanitized_title = resume.sanitize_filename(s_job["title"])
-                file_basename = f"{sanitized_comp}_{sanitized_title}_{s_job['id']}"
-
-                os.makedirs("generated/resumes", exist_ok=True)
-                tex_path = os.path.abspath(f"generated/resumes/{file_basename}.tex")
-                
-                with open(tex_path, "w", encoding="utf-8") as f:
-                    f.write(latex_code)
-
-                # Generate local Overleaf redirect URL
-                resume_success_count += 1
-                base_url = os.getenv("LOCAL_BASE_URL", "http://localhost:5000")
-                overleaf_url = f"{base_url}/jobs/{s_job['id']}/overleaf"
-                s_job["drive_url"] = overleaf_url
-
-                database.update_job_resume(
-                    job_id=s_job["id"],
-                    resume_json=tailored_res,
-                    tex_path=tex_path,
-                    pdf_path=None,
-                    drive_url=overleaf_url,
-                    status="selected",
-                    db_path=db_path
-                )
-            except Exception as e:
-                resume_error_count += 1
-                logger.error(f"Error tailoring resume for job #{s_job['id']}: {e}")
-
-        # Step 8: Sync Google Sheet
-        report_progress("Google Sheets", "Syncing final selected job dashboard to Google Sheets...")
+        # Step 7: Sync Google Sheet
+        report_progress("Google Sheets", "Syncing selected job dashboard to Google Sheets...")
         try:
+            google_service.initialize_google_sheets()
             google_service.sync_jobs_to_sheet(selected_jobs)
         except Exception as e:
             logger.warning(f"Google Sheets sync warning: {e}")
 
-        final_run_status = "completed" if resume_error_count == 0 else "partial"
+        final_run_status = "completed"
         report_progress(
             "Complete",
-            f"Run completed. Selected: {selected_count}, Resumes Created: {resume_success_count}, Errors: {resume_error_count}",
+            f"Run completed successfully. {selected_count} jobs selected and saved.",
             {
                 "status": final_run_status,
-                "resume_success_count": resume_success_count,
-                "resume_error_count": resume_error_count
+                "selected_count": selected_count
             }
+        )
+
+        database.update_run_progress(
+            run_id,
+            discovered_count=discovered_count,
+            duplicate_count=duplicate_count,
+            invalid_count=0,
+            filtered_count=filtered_count,
+            analyzed_count=analyzed_count,
+            selected_count=selected_count,
+            resume_success_count=0,
+            resume_error_count=0,
+            status=final_run_status,
+            db_path=db_path
         )
 
         return {
@@ -365,11 +407,12 @@ def run_job_search_pipeline(
             "run_id": run_id,
             "discovered_count": discovered_count,
             "duplicate_count": duplicate_count,
+            "invalid_count": 0,
             "filtered_count": filtered_count,
             "analyzed_count": analyzed_count,
             "selected_count": selected_count,
-            "resume_success_count": resume_success_count,
-            "resume_error_count": resume_error_count
+            "resume_success_count": 0,
+            "resume_error_count": 0
         }
 
     except Exception as e:

@@ -35,7 +35,7 @@ MOCK_DISCOVERED_JOBS = [
         "source_job_id": "1003",
         "unique_id": "ashby:1003",
         "company": "DataWorks",
-        "title": "AI/ML Engineer",
+        "title": "Junior AI/ML Engineer",
         "location": "Remote",
         "employment_type": "Full-time",
         "description": "Machine learning engineer role using PyTorch, Python, and SQL.",
@@ -98,7 +98,23 @@ class TestEndToEnd(unittest.TestCase):
         
         top_job = first_selected_jobs[0]
         self.assertIsNotNone(top_job["final_score"])
-        self.assertIsNotNone(top_job["resume_tex_path"])
+        # In new on-demand workflow, resume is initially Not generated
+        self.assertIsNone(top_job.get("resume_tex_path"))
+
+        # Generate resume on-demand via Flask test client
+        import app as flask_app
+        original_db = database.DB_PATH
+        database.DB_PATH = self.db_path
+        try:
+            flask_app.app.config["TESTING"] = True
+            client = flask_app.app.test_client()
+            gen_res = client.post(f"/jobs/{top_job['id']}/generate-resume")
+            self.assertEqual(gen_res.status_code, 200)
+
+            updated_job_resume = database.get_job_by_id(top_job["id"], db_path=self.db_path)
+            self.assertIsNotNone(updated_job_resume["resume_tex_path"])
+        finally:
+            database.DB_PATH = original_db
 
         # Mark top job as Applied
         database.update_job_status(top_job["id"], "applied", db_path=self.db_path)

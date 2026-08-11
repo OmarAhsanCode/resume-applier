@@ -98,3 +98,51 @@ function updateJobStatus(jobId, status) {
     })
     .catch(err => console.error('Error updating job status:', err));
 }
+
+function generateResume(jobId, buttonEl) {
+    if (!buttonEl) buttonEl = document.getElementById(`resume-btn-${jobId}`);
+    if (!buttonEl || buttonEl.disabled) return;
+
+    const originalText = buttonEl.innerText;
+    buttonEl.disabled = true;
+    buttonEl.innerText = '◌ Generating...';
+
+    fetch(`/jobs/${jobId}/generate-resume`, {
+        method: 'POST'
+    })
+    .then(res => res.json().then(data => ({ status: res.status, body: data })))
+    .then(result => {
+        if (result.status === 200 && result.body.status === 'success') {
+            showToast('Resume created successfully.', 'success');
+            const cell = document.getElementById(`resume-cell-${jobId}`);
+            if (cell) {
+                cell.innerHTML = `<a href="${result.body.overleaf_url}" target="_blank" class="btn btn-sm btn-drive">✏ Open in Overleaf</a>`;
+            }
+        } else {
+            const msg = (result.body && result.body.message) ? result.body.message : 'Resume generation failed. Please try again.';
+            showToast(msg, 'error');
+            buttonEl.disabled = false;
+            buttonEl.innerText = originalText;
+        }
+    })
+    .catch(err => {
+        console.error('Error generating resume:', err);
+        showToast('Resume generation failed. Please try again.', 'error');
+        buttonEl.disabled = false;
+        buttonEl.innerText = originalText;
+    });
+}
+
+function showToast(message, type) {
+    let toast = document.getElementById('toast-notification');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'toast-notification';
+        document.body.appendChild(toast);
+    }
+    toast.className = `toast toast-${type} show`;
+    toast.innerText = message;
+    setTimeout(() => {
+        toast.classList.remove('show');
+    }, 4000);
+}

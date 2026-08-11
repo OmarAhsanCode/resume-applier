@@ -23,12 +23,14 @@
             <tr>
                 <th>Rank</th>
                 <th>Company</th>
-                <th>Position / Title</th>
+                <th>Position</th>
                 <th>Location</th>
-                <th>Scores</th>
-                <th>AI Match Reasoning</th>
-                <th>Tailored Resume</th>
-                <th>Official Link</th>
+                <th>Type</th>
+                <th>Salary / Stipend</th>
+                <th>Key Points</th>
+                <th>Score</th>
+                <th>Resume</th>
+                <th>Apply</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -42,24 +44,33 @@
                     <span class="job-source-tag">{{ job.source }}</span>
                 </td>
                 <td class="cell-location">{{ job.location or 'Remote' }}</td>
-                <td class="cell-scores">
-                    <div class="score-badge final-score">Final: {{ job.final_score or job.deterministic_score or 'N/A' }}</div>
-                    <div class="score-sub">Det: {{ job.deterministic_score or '-' }} | AI: {{ job.ai_score or '-' }}</div>
+                <td class="cell-type"><span class="badge badge-info">{{ job.employment_type or 'Unknown' }}</span></td>
+                <td class="cell-salary">
+                    {% set sal = job.normalized_salary or (job.ai_analysis.extracted_salary if job.ai_analysis else None) %}
+                    <span class="salary-text">{{ sal if sal and sal != 'None' else 'Not disclosed' }}</span>
                 </td>
-                <td class="cell-reason">
-                    {% if job.ai_analysis and job.ai_analysis.reason %}
+                <td class="cell-keypoints">
+                    {% if job.ai_analysis and job.ai_analysis.key_points %}
+                        <ul class="key-points-list">
+                            {% for point in job.ai_analysis.key_points %}
+                                <li>• {{ point }}</li>
+                            {% endfor %}
+                        </ul>
+                    {% elif job.ai_analysis and job.ai_analysis.reason %}
                         <p class="reason-text">{{ job.ai_analysis.reason }}</p>
                     {% else %}
                         <p class="reason-text muted">Deterministic score match.</p>
                     {% endif %}
                 </td>
-                <td class="cell-resume">
-                    {% if job.drive_url %}
-                        <a href="{{ job.drive_url }}" target="_blank" class="btn btn-sm btn-drive">✏ Open Overleaf</a>
-                    {% elif job.resume_tex_path %}
-                        <a href="{{ url_for('open_in_overleaf', job_id=job.id) }}" target="_blank" class="btn btn-sm btn-drive">✏ Open Overleaf</a>
+                <td class="cell-scores">
+                    <div class="score-badge final-score">Final: {{ job.final_score or job.deterministic_score or 'N/A' }}</div>
+                    <div class="score-sub">Det: {{ job.deterministic_score or '-' }} | AI: {{ job.ai_score or '-' }}</div>
+                </td>
+                <td class="cell-resume" id="resume-cell-{{ job.id }}">
+                    {% if job.resume_tex_path or job.resume_json %}
+                        <a href="{{ url_for('open_in_overleaf', job_id=job.id) }}" target="_blank" class="btn btn-sm btn-drive">✏ Open in Overleaf</a>
                     {% else %}
-                        <span class="muted">Pending</span>
+                        <button id="resume-btn-{{ job.id }}" onclick="generateResume('{{ job.id }}', this)" class="btn btn-sm btn-primary btn-generate-resume">Generate Resume</button>
                     {% endif %}
                 </td>
                 <td class="cell-apply">

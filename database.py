@@ -79,8 +79,6 @@ def init_db(db_path: str = None) -> None:
         ai_analysis TEXT,
         resume_json TEXT,
         resume_tex_path TEXT,
-        resume_pdf_path TEXT,
-        drive_url TEXT,
         applied_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -270,8 +268,8 @@ def save_job(job_data: Dict[str, Any], db_path: str = None) -> int:
         source, source_job_id, unique_id, company, title, location, employment_type,
         description, application_url, posted_date, first_seen, last_seen, status,
         deterministic_score, ai_score, final_score, ai_analysis, resume_json,
-        resume_tex_path, resume_pdf_path, drive_url, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        resume_tex_path, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         job_data.get("source"),
         job_data.get("source_job_id"),
@@ -290,8 +288,6 @@ def save_job(job_data: Dict[str, Any], db_path: str = None) -> int:
         json.dumps(job_data["ai_analysis"]) if isinstance(job_data.get("ai_analysis"), dict) else job_data.get("ai_analysis"),
         json.dumps(job_data["resume_json"]) if isinstance(job_data.get("resume_json"), dict) else job_data.get("resume_json"),
         job_data.get("resume_tex_path"),
-        job_data.get("resume_pdf_path"),
-        job_data.get("drive_url"),
         now, now
     ))
     job_id = cursor.lastrowid
@@ -318,7 +314,7 @@ def update_job_evaluation(job_id: int, deterministic_score: float = None, ai_sco
     conn.commit()
     conn.close()
 
-def update_job_resume(job_id: int, resume_json: Dict = None, tex_path: str = None, pdf_path: str = None, drive_url: str = None, status: str = None, db_path: str = None) -> None:
+def update_job_resume(job_id: int, resume_json: Dict = None, tex_path: str = None, status: str = None, db_path: str = None) -> None:
     """Updates resume data and generated paths for a job."""
     conn = get_connection(db_path)
     now = datetime.now().isoformat()
@@ -329,12 +325,10 @@ def update_job_resume(job_id: int, resume_json: Dict = None, tex_path: str = Non
     UPDATE jobs SET
         resume_json = COALESCE(?, resume_json),
         resume_tex_path = COALESCE(?, resume_tex_path),
-        resume_pdf_path = COALESCE(?, resume_pdf_path),
-        drive_url = COALESCE(?, drive_url),
         status = COALESCE(?, status),
         updated_at = ?
     WHERE id = ?
-    """, (res_json_str, tex_path, pdf_path, drive_url, status, now, job_id))
+    """, (res_json_str, tex_path, status, now, job_id))
     conn.commit()
     conn.close()
 

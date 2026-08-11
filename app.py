@@ -139,29 +139,28 @@ def preferences_route():
             jobs_per_run = int(request.form.get("jobs_per_run", 50))
             dream_companies = [c.strip() for c in request.form.get("dream_companies", "").split("\n") if c.strip()]
             
+            min_sal_raw = request.form.get("minimum_salary", "").strip()
+            min_salary = int(min_sal_raw) if min_sal_raw.isdigit() else None
+            include_undisclosed = request.form.get("include_undisclosed_salary") in ["true", "on", "1"] or "include_undisclosed_salary" in request.form
+            
             pref_data = {
                 "preferred_roles": roles,
                 "locations": locations,
                 "work_modes": work_modes,
                 "experience_levels": exp_levels,
                 "jobs_per_run": jobs_per_run,
-                "dream_companies": dream_companies
+                "dream_companies": dream_companies,
+                "minimum_salary": min_salary,
+                "include_undisclosed_salary": include_undisclosed
             }
             database.save_preferences(pref_data)
-            flash("Job search preferences saved!", "success")
+            flash("Job preferences updated successfully!", "success")
             return redirect(url_for("index"))
         except Exception as e:
             flash(f"Error saving preferences: {e}", "error")
 
-    preferences = database.get_preferences() or {
-        "preferred_roles": ["Software Engineer", "AI/ML Engineer", "Python Developer"],
-        "locations": ["Remote", "Hyderabad", "Bangalore"],
-        "work_modes": ["remote", "hybrid"],
-        "experience_levels": ["entry_level", "internship"],
-        "jobs_per_run": 50,
-        "dream_companies": ["Google", "Microsoft", "NVIDIA", "Amazon"]
-    }
-    return render_template("preferences.html", preferences=preferences)
+    prefs = database.get_preferences()
+    return render_template("preferences.html", preferences=prefs)
 
 @app.route("/resume-settings", methods=["GET", "POST"])
 def resume_settings_route():
@@ -252,15 +251,77 @@ def results():
         all_jobs = database.get_all_jobs(status_filter=status_filter, limit=100)
     return render_template("results.html", jobs=all_jobs, current_filter=status_filter)
 
+import google_service
+
 @app.route("/jobs/<int:job_id>/applied", methods=["POST"])
 def mark_applied(job_id):
     database.update_job_status(job_id, "applied")
+    job = database.get_job_by_id(job_id)
+    if job:
+        google_service.update_job_status_in_sheet(job)
     return jsonify({"status": "success", "message": "Job marked as Applied."})
 
 @app.route("/jobs/<int:job_id>/rejected", methods=["POST"])
 def mark_rejected(job_id):
     database.update_job_status(job_id, "rejected")
+    job = database.get_job_by_id(job_id)
+    if job:
+        google_service.update_job_status_in_sheet(job)
     return jsonify({"status": "success", "message": "Job marked as Rejected."})
+
+@app.route("/jobs/<int:job_id>/generate-resume", methods=["POST"])
+def generate_resume_endpoint(job_id):
+    job = database.get_job_by_id(job_id)
+    if not job:
+        return jsonify({"status": "error", "message": "Job not found."}), 404
+
+    cand_record = database.get_candidate()
+    if not cand_record or not cand_record.get("profile"):
+        return jsonify({"status": "error", "message": "Candidate profile not configured. Please complete setup."}), 400
+
+    profile = cand_record["profile"]
+    settings = database.get_resume_settings()
+    ai_analysis = job.get("ai_analysis") or {}
+
+    try:
+        tailored_res = ai.tailor_resume(profile, job, ai_analysis, settings)
+        latex_code = resume.render_latex(tailored_res)
+
+        sanitized_comp = resume.sanitize_filename(job.get("company", "Company"))
+        sanitized_title = resume.sanitize_filename(job.get("title", "Role"))
+        file_basename = f"{sanitized_comp}_{sanitized_title}_{job['id']}"
+        os.makedirs("generated/resumes", exist_ok=True)
+        tex_path = os.path.abspath(f"generated/resumes/{file_basename}.tex")
+        
+        with open(tex_path, "w", encoding="utf-8") as f:
+            f.write(latex_code)
+
+        database.update_job_resume(
+            job_id=job['id'],
+            resume_json=tailored_res,
+            tex_path=tex_path,
+            status=job.get("status", "selected")
+        )
+
+        base_url = os.getenv("LOCAL_BASE_URL", "http://localhost:5000")
+        overleaf_url = f"{base_url}/jobs/{job['id']}/overleaf"
+
+        try:
+            google_service.update_job_resume_url_in_sheet(job, overleaf_url)
+        except Exception as e:
+            logger.warning(f"Failed to update Resume URL in Google Sheets: {e}")
+
+        return jsonify({
+            "status": "success",
+            "message": "Resume created successfully.",
+            "overleaf_url": overleaf_url
+        })
+    except Exception as e:
+        logger.error(f"Error generating resume for job #{job_id}: {e}")
+        err_msg = str(e)
+        if "rate" in err_msg.lower() or "429" in err_msg:
+            return jsonify({"status": "error", "message": "Resume generation is temporarily rate-limited. Please try again later."}), 429
+        return jsonify({"status": "error", "message": "Resume generation failed. Please try again."}), 500
 
 @app.route("/jobs/<int:job_id>/overleaf")
 def open_in_overleaf(job_id):
@@ -284,27 +345,37 @@ def open_in_overleaf(job_id):
             tex_code = resume.render_latex(job["resume_json"])
         except Exception as e:
             logger.error(f"Error rendering latex from json: {e}")
+
+    if not tex_code:
+        # On-demand resume generation retry
+        try:
+            cand_record = database.get_candidate()
+            profile = cand_record.get("profile") if cand_record else {}
+            settings = database.get_resume_settings()
+            ai_analysis = job.get("ai_analysis") or {}
+            tailored_res = ai.tailor_resume(profile, job, ai_analysis, settings)
+            tex_code = resume.render_latex(tailored_res)
+            
+            sanitized_comp = resume.sanitize_filename(job.get("company", "Company"))
+            sanitized_title = resume.sanitize_filename(job.get("title", "Role"))
+            file_basename = f"{sanitized_comp}_{sanitized_title}_{job['id']}"
+            os.makedirs("generated/resumes", exist_ok=True)
+            tex_path = os.path.abspath(f"generated/resumes/{file_basename}.tex")
+            with open(tex_path, "w", encoding="utf-8") as f:
+                f.write(tex_code)
+                
+            database.update_job_resume(job_id=job["id"], resume_json=tailored_res, tex_path=tex_path, status=job.get("status", "selected"))
+        except Exception as e:
+            logger.error(f"On-demand resume generation failed for job #{job_id}: {e}")
             
     if not tex_code:
         flash("Resume source code not available.", "error")
         return redirect(url_for("results"))
         
-    template = """<!DOCTYPE html>
-<html>
-<head>
-    <title>Redirecting to Overleaf...</title>
-</head>
-<body>
-    <p>Opening your tailored resume in Overleaf, please wait...</p>
-    <form id="overleafForm" action="https://www.overleaf.com/docs" method="POST">
-        <input type="hidden" name="snip" value="{{ tex_code }}">
-    </form>
-    <script>
-        document.getElementById('overleafForm').submit();
-    </script>
-</body>
-</html>"""
-    return render_template_string(template, tex_code=tex_code)
+    import base64
+    encoded_tex = base64.b64encode(tex_code.encode('utf-8')).decode('utf-8')
+    overleaf_url = f"https://www.overleaf.com/docs?snip_uri=data:application/x-tex;base64,{encoded_tex}"
+    return redirect(overleaf_url)
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))

@@ -44,6 +44,20 @@
 
         <div class="form-row">
             <div class="form-group flex-1">
+                <label for="minimum_salary">Minimum Salary / Stipend (₹ per month)</label>
+                <input type="number" id="minimum_salary" name="minimum_salary" value="{{ preferences.minimum_salary if preferences and preferences.minimum_salary else '' }}" placeholder="e.g. 30000" class="form-input">
+            </div>
+
+            <div class="form-group flex-1" style="display: flex; align-items: flex-end; padding-bottom: 8px;">
+                <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox" name="include_undisclosed_salary" value="true" {% if not preferences or preferences.include_undisclosed_salary != False %}checked{% endif %}>
+                    <span>Include jobs where salary/stipend is not disclosed</span>
+                </label>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group flex-1">
                 <label for="jobs_per_run">Default Target Jobs Per Run</label>
                 <input type="number" id="jobs_per_run" name="jobs_per_run" value="{{ preferences.jobs_per_run if preferences else 50 }}" class="form-input">
             </div>

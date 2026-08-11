@@ -32,7 +32,7 @@ def discover_jobs(search_config: Dict[str, Any] = None) -> List[Dict[str, Any]]:
                         title = item.get("text", "")
                         categories = item.get("categories", {})
                         location = categories.get("location", "Remote") if isinstance(categories, dict) else "Remote"
-                        emp_type = categories.get("commitment", "Full-time") if isinstance(categories, dict) else "Full-time"
+                        emp_type = categories.get("commitment") if isinstance(categories, dict) else None
                         
                         app_url = item.get("hostedUrl", f"https://jobs.lever.co/{comp}/{job_id}")
                         

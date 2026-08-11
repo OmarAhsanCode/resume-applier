@@ -45,7 +45,7 @@ def get_google_credentials():
         logger.warning(f"Could not load Google credentials: {e}")
         return None
 
-def initialize_google_drive():
+def initialize_google_sheets():
     """Initializes Google Sheets API client if credentials exist."""
     global _sheets_service
     creds = get_google_credentials()
@@ -61,13 +61,51 @@ def initialize_google_drive():
         logger.warning(f"Failed to build Google Sheets service: {e}")
         return False
 
-def upload_pdf_to_drive(pdf_path: str, company_name: str) -> Optional[str]:
-    """Stub upload_pdf_to_drive function - Google Drive is disabled in favor of Overleaf."""
-    return None
+SHEET_HEADERS = [
+    "Job ID", "Rank", "Company", "Position", "Location", "Employment Type",
+    "Deterministic Score", "AI Score", "Final Score", "Matching Skills",
+    "Missing Skills", "Why Match", "Job URL", "Resume URL", "Status",
+    "Date Found", "Date Applied"
+]
+
+def _build_job_row(idx: int, job: Dict[str, Any], base_url: str) -> List[Any]:
+    analysis = job.get("ai_analysis", {})
+    matching = ", ".join(analysis.get("matching_requirements", [])) if isinstance(analysis, dict) else ""
+    missing = ", ".join(analysis.get("missing_preferred_skills", [])) if isinstance(analysis, dict) else ""
+    why_match = analysis.get("reason", "") if isinstance(analysis, dict) else ""
+    job_db_id = job.get("id") or ""
+    
+    if job.get("resume_tex_path") or job.get("resume_json"):
+        overleaf_url = f"{base_url}/jobs/{job_db_id}/overleaf" if job_db_id else ""
+    else:
+        overleaf_url = "Not generated"
+
+    job_key = str(job.get("unique_id") or job.get("id") or "")
+
+    return [
+        job_key,
+        idx,
+        job.get("company", ""),
+        job.get("title", ""),
+        job.get("location", ""),
+        job.get("employment_type", ""),
+        job.get("deterministic_score", 0),
+        job.get("ai_score", 0),
+        job.get("final_score", 0),
+        matching,
+        missing,
+        why_match,
+        job.get("application_url", ""),
+        overleaf_url,
+        job.get("status", "selected"),
+        str(job.get("first_seen", ""))[:10],
+        str(job.get("applied_at", ""))[:10] if job.get("applied_at") else ""
+    ]
 
 def sync_jobs_to_sheet(selected_jobs: List[Dict[str, Any]]) -> bool:
     """
-    Syncs selected jobs dashboard to Google Spreadsheet according to PROJECT_SPEC.md column specification.
+    Syncs selected jobs to Google Spreadsheet by appending new jobs and updating existing rows.
+    Preserves historical rows across runs.
     """
     global _sheets_service
     if not _sheets_service or not GOOGLE_SHEETS_SPREADSHEET_ID:
@@ -75,52 +113,153 @@ def sync_jobs_to_sheet(selected_jobs: List[Dict[str, Any]]) -> bool:
         return False
 
     try:
-        headers = [
-            "Rank", "Company", "Position", "Location", "Employment Type",
-            "Deterministic Score", "AI Score", "Final Score", "Matching Skills",
-            "Missing Skills", "Why Match", "Job URL", "Resume URL", "Status",
-            "Date Found", "Date Applied"
-        ]
+        base_url = os.getenv("LOCAL_BASE_URL", "http://localhost:5000")
+        
+        # Read existing rows from Sheet1!A:Q
+        try:
+            read_res = _sheets_service.spreadsheets().values().get(
+                spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+                range='Sheet1!A:Q'
+            ).execute()
+            existing_values = read_res.get('values', [])
+        except Exception:
+            existing_values = []
 
-        rows = [headers]
+        # If sheet is totally empty, insert header row
+        if not existing_values:
+            _sheets_service.spreadsheets().values().update(
+                spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+                range='Sheet1!A1',
+                valueInputOption='USER_ENTERED',
+                body={'values': [SHEET_HEADERS]}
+            ).execute()
+            existing_values = [SHEET_HEADERS]
+
+        # Map existing job keys (Job ID or Job URL) to 1-indexed row number
+        job_row_map = {}
+        for r_idx, row_data in enumerate(existing_values, 1):
+            if r_idx == 1:
+                continue
+            if row_data:
+                key = str(row_data[0]).strip() if len(row_data) > 0 else ""
+                url_key = str(row_data[12]).strip() if len(row_data) > 12 else ""
+                if key:
+                    job_row_map[key] = r_idx
+                if url_key:
+                    job_row_map[url_key] = r_idx
+
+        existing_rows_count = len(existing_values)
         for idx, job in enumerate(selected_jobs, 1):
-            analysis = job.get("ai_analysis", {})
-            matching = ", ".join(analysis.get("matching_requirements", [])) if isinstance(analysis, dict) else ""
-            missing = ", ".join(analysis.get("missing_preferred_skills", [])) if isinstance(analysis, dict) else ""
-            why_match = analysis.get("reason", "") if isinstance(analysis, dict) else ""
+            job_key = str(job.get("unique_id") or job.get("id") or "")
+            app_url = str(job.get("application_url") or "")
+            row_data = _build_job_row(idx, job, base_url)
 
-            row = [
-                idx,
-                job.get("company", ""),
-                job.get("title", ""),
-                job.get("location", ""),
-                job.get("employment_type", ""),
-                job.get("deterministic_score", 0),
-                job.get("ai_score", 0),
-                job.get("final_score", 0),
-                matching,
-                missing,
-                why_match,
-                job.get("application_url", ""),
-                job.get("drive_url") or job.get("resume_pdf_path") or "",
-                job.get("status", "selected"),
-                job.get("first_seen", "")[:10],
-                job.get("applied_at", "")[:10] if job.get("applied_at") else ""
-            ]
-            rows.append(row)
+            row_number = job_row_map.get(job_key) or job_row_map.get(app_url)
+            if row_number:
+                # Update existing row in-place
+                _sheets_service.spreadsheets().values().update(
+                    spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+                    range=f'Sheet1!A{row_number}:Q{row_number}',
+                    valueInputOption='USER_ENTERED',
+                    body={'values': [row_data]}
+                ).execute()
+            else:
+                # Append new row
+                _sheets_service.spreadsheets().values().append(
+                    spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+                    range='Sheet1!A1',
+                    valueInputOption='USER_ENTERED',
+                    insertDataOption='INSERT_ROWS',
+                    body={'values': [row_data]}
+                ).execute()
+                existing_rows_count += 1
+                job_row_map[job_key] = existing_rows_count
+                if app_url:
+                    job_row_map[app_url] = existing_rows_count
 
-        body = {'values': rows}
-        range_name = 'Sheet1!A1'
-        
-        _sheets_service.spreadsheets().values().update(
-            spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
-            range=range_name,
-            valueInputOption='USER_ENTERED',
-            body=body
-        ).execute()
-        
         logger.info(f"Successfully synced {len(selected_jobs)} jobs to Google Sheet.")
         return True
     except Exception as e:
         logger.error(f"Error syncing jobs to Google Sheets: {e}")
         return False
+
+def _find_job_row_number(job: Dict[str, Any]) -> Optional[int]:
+    """Finds the 1-indexed row number of a job in Google Sheets."""
+    global _sheets_service
+    if not _sheets_service or not GOOGLE_SHEETS_SPREADSHEET_ID:
+        return None
+
+    try:
+        read_res = _sheets_service.spreadsheets().values().get(
+            spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+            range='Sheet1!A:Q'
+        ).execute()
+        existing_values = read_res.get('values', [])
+        job_key = str(job.get("unique_id") or job.get("id") or "")
+        app_url = str(job.get("application_url") or "")
+
+        for r_idx, row_data in enumerate(existing_values, 1):
+            if r_idx == 1:
+                continue
+            if row_data:
+                key = str(row_data[0]).strip() if len(row_data) > 0 else ""
+                url_key = str(row_data[12]).strip() if len(row_data) > 12 else ""
+                if (job_key and key == job_key) or (app_url and url_key == app_url):
+                    return r_idx
+        return None
+    except Exception as e:
+        logger.warning(f"Error finding job row number in Sheet: {e}")
+        return None
+
+def update_job_status_in_sheet(job: Dict[str, Any]) -> bool:
+    """Updates application status column (Col O / Col 15) of a single job in Google Sheets without altering Resume URL."""
+    row_num = _find_job_row_number(job)
+    if not row_num or not _sheets_service:
+        return sync_jobs_to_sheet([job])
+
+    try:
+        status_val = job.get("status", "selected")
+        applied_at_val = str(job.get("applied_at", ""))[:10] if job.get("applied_at") else ""
+        
+        # Col O is Status (15th col), Col Q is Date Applied (17th col)
+        _sheets_service.spreadsheets().values().update(
+            spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+            range=f'Sheet1!O{row_num}',
+            valueInputOption='USER_ENTERED',
+            body={'values': [[status_val]]}
+        ).execute()
+
+        if applied_at_val:
+            _sheets_service.spreadsheets().values().update(
+                spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+                range=f'Sheet1!Q{row_num}',
+                valueInputOption='USER_ENTERED',
+                body={'values': [[applied_at_val]]}
+            ).execute()
+
+        logger.info(f"Updated status for job #{job.get('id')} to '{status_val}' in Sheet row {row_num}.")
+        return True
+    except Exception as e:
+        logger.error(f"Error updating job status in Sheet: {e}")
+        return sync_jobs_to_sheet([job])
+
+def update_job_resume_url_in_sheet(job: Dict[str, Any], overleaf_url: str) -> bool:
+    """Updates Resume URL column (Col N / Col 14) of a single job in Google Sheets without altering application status."""
+    row_num = _find_job_row_number(job)
+    if not row_num or not _sheets_service:
+        return sync_jobs_to_sheet([job])
+
+    try:
+        # Col N is Resume URL (14th col)
+        _sheets_service.spreadsheets().values().update(
+            spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+            range=f'Sheet1!N{row_num}',
+            valueInputOption='USER_ENTERED',
+            body={'values': [[overleaf_url]]}
+        ).execute()
+
+        logger.info(f"Updated Resume URL for job #{job.get('id')} in Sheet row {row_num}.")
+        return True
+    except Exception as e:
+        logger.error(f"Error updating Resume URL in Sheet: {e}")
+        return sync_jobs_to_sheet([job])

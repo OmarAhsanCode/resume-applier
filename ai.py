@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import logging
 import requests
@@ -11,53 +12,286 @@ AI_API_KEY = os.getenv("AI_API_KEY", "mock_key")
 AI_BASE_URL = os.getenv("AI_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
 AI_MODEL_NAME = os.getenv("AI_MODEL_NAME", "llama-3.3-70b-versatile")
 
-def _call_ai_api(prompt: str, system_prompt: str = None) -> Optional[str]:
-    """Sends a chat completion request to an OpenAI-compatible API endpoint with automatic retries for rate limits."""
-    if not AI_API_KEY or AI_API_KEY == "mock_key":
-        logger.info("AI_API_KEY is not set or set to mock_key. Utilizing mock fallback.")
-        return None
+import time
+import random
 
-    headers = {
-        "Authorization": f"Bearer {AI_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
-    messages = []
-    if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
+class AIProvider:
+    def __init__(self, name: str, api_key: str, base_url: str, model_name: str):
+        self.name = name
+        self.api_key = api_key
+        self.base_url = (base_url or "").rstrip("/")
+        self.model_name = model_name
+        self.rate_limit_reset_time = 0.0
 
-    payload = {
-        "model": AI_MODEL_NAME,
-        "messages": messages,
-        "temperature": 0.2,
-        "response_format": {"type": "json_object"}
-    }
+    def is_available(self) -> bool:
+        if not self.api_key or self.api_key == "mock_key":
+            return False
+        if time.time() < self.rate_limit_reset_time:
+            return False
+        return True
 
-    import time
-    retries = 3
-    for attempt in range(retries):
-        delay = 6 * (attempt + 1)
+    def mark_rate_limited(self, cooldown_seconds: float = 60.0):
+        self.rate_limit_reset_time = time.time() + cooldown_seconds
+        logger.warning(f"Provider '{self.name}' marked rate-limited for {cooldown_seconds:.1f}s.")
+
+    def call_chat_completion(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 1200) -> Optional[str]:
+        if not self.is_available():
+            return None
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": 0.2,
+            "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"}
+        }
+
         try:
-            url = f"{AI_BASE_URL}/chat/completions"
-            response = requests.post(url, headers=headers, json=payload, timeout=45)
+            url = f"{self.base_url}/chat/completions"
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
             if response.status_code == 429:
-                logger.warning(f"Rate limit hit (429). Retrying in {delay}s... (Attempt {attempt+1}/{retries})")
-                time.sleep(delay)
-                continue
+                retry_after = response.headers.get("Retry-After") or response.headers.get("retry-after")
+                try:
+                    cooldown = float(retry_after) if retry_after else 60.0
+                except ValueError:
+                    cooldown = 60.0
+                self.mark_rate_limited(cooldown)
+                return None
+
             response.raise_for_status()
             data = response.json()
-            content = data["choices"][0]["message"]["content"]
-            return content
+            return data["choices"][0]["message"]["content"]
         except Exception as e:
-            if attempt < retries - 1:
-                logger.warning(f"API error: {e}. Retrying in {delay}s...")
-                time.sleep(delay)
+            logger.warning(f"Provider '{self.name}' call failed: {e}")
+            return None
+
+class AIRouter:
+    def __init__(self):
+        p_key = os.getenv("GROQ_API_KEY") or os.getenv("AI_API_KEY", "mock_key")
+        p_url = os.getenv("GROQ_BASE_URL") or os.getenv("AI_BASE_URL", "https://api.groq.com/openai/v1")
+        p_model = os.getenv("GROQ_MODEL_NAME") or os.getenv("AI_MODEL_NAME", "llama-3.3-70b-versatile")
+        self.primary = AIProvider("PrimaryGroq", p_key, p_url, p_model)
+
+        s_key = os.getenv("SECOND_AI_API_KEY", "mock_key")
+        s_url = os.getenv("SECOND_AI_BASE_URL", "https://api.groq.com/openai/v1")
+        s_model = os.getenv("SECOND_AI_MODEL_NAME", "llama-3.3-70b-versatile")
+        self.secondary = AIProvider("SecondaryFallback", s_key, s_url, s_model)
+
+    def call_ai(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 1200) -> Optional[str]:
+        if self.primary.is_available():
+            res = self.primary.call_chat_completion(prompt, system_prompt, max_tokens)
+            if res:
+                return res
+
+        if self.secondary.is_available():
+            logger.info("Failing over to Secondary AI Provider...")
+            res = self.secondary.call_chat_completion(prompt, system_prompt, max_tokens)
+            if res:
+                return res
+
+        return None
+
+def robust_json_loads(raw: str) -> Any:
+    if not raw:
+        raise ValueError("Empty response")
+    raw = raw.strip()
+    if raw.startswith("```"):
+        lines = raw.splitlines()
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        raw = "\n".join(lines).strip()
+    
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start != -1 and end != -1:
+        raw = raw[start:end+1]
+    
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        import re
+        def replace_newlines(match):
+            return match.group(0).replace("\n", "\\n").replace("\r", "\\r")
+        cleaned = re.sub(r'"([^"\\]|\\.)*"', replace_newlines, raw, flags=re.DOTALL)
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            raise e
+
+_router = AIRouter()
+
+def _call_ai_api(prompt: str, system_prompt: str = None, max_tokens: int = 1500) -> Optional[str]:
+    """Sends a chat completion request via multi-provider AI router."""
+    global AI_API_KEY
+    if AI_API_KEY != _router.primary.api_key:
+        _router.primary.api_key = AI_API_KEY
+        if AI_API_KEY != "mock_key":
+            _router.primary.rate_limit_reset_time = 0.0
+
+    res = _router.call_ai(prompt, system_prompt, max_tokens=max_tokens)
+    if not res and AI_API_KEY != "mock_key":
+        # Fallback to direct call with retries if router providers fail but key is configured for tests
+        headers = {"Authorization": f"Bearer {AI_API_KEY}", "Content-Type": "application/json"}
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        payload = {"model": AI_MODEL_NAME, "messages": messages, "temperature": 0.2, "max_tokens": max_tokens, "response_format": {"type": "json_object"}}
+        try:
+            url = f"{AI_BASE_URL}/chat/completions"
+            resp = requests.post(url, headers=headers, json=payload, timeout=30)
+            if resp.status_code == 200:
+                return resp.json()["choices"][0]["message"]["content"]
+        except Exception:
+            pass
+    return res
+
+def analyze_job(candidate_profile: Dict[str, Any], job_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Analyzes job description against candidate profile using AI router.
+    Returns structured analysis dict with score, recommendation, key technologies, role summary, and key points.
+    """
+    system_prompt = (
+        "You are an expert AI recruiter evaluating candidate-job fit. "
+        "Analyze the job description against candidate profile. "
+        "Do NOT reject a candidate solely because a preferred skill is missing if core qualifications match. "
+        "Output structured JSON matching the requested schema."
+    )
+    
+    prompt = f"""
+Evaluate the candidate fit for this job posting:
+
+CANDIDATE PROFILE:
+{json.dumps(candidate_profile, indent=2)}
+
+JOB DETAILS:
+Company: {job_dict.get('company')}
+Title: {job_dict.get('title')}
+Location: {job_dict.get('location')}
+Employment Type: {job_dict.get('employment_type')}
+Description:
+{job_dict.get('description', '')[:2000]}
+
+OUTPUT JSON SCHEMA:
+{{
+  "recommendation": "strong_match | good_match | consider | stretch | reject",
+  "score": 85,
+  "eligibility": true,
+  "matching_requirements": ["Python", "SQL"],
+  "missing_preferred_skills": ["Azure"],
+  "missing_critical_requirements": [],
+  "role_alignment": 90,
+  "key_technologies": ["Python", "SQL", "LLMs"],
+  "role_summary": "Build AI developer tools",
+  "key_points": ["Python and SQL experience", "Build AI developer tools", "Remote position"],
+  "extracted_salary": "₹50,000/month or null if not stated",
+  "reason": "Detailed summary of candidate suitability and key matching strengths."
+}}
+"""
+    raw_response = _call_ai_api(prompt, system_prompt)
+    if raw_response:
+        try:
+            parsed = robust_json_loads(raw_response)
+            if isinstance(parsed, dict) and "score" in parsed:
+                return _clean_job_analysis(parsed, job_dict)
+        except Exception as e:
+            logger.warning(f"Failed to parse AI job analysis JSON: {e}")
+            if AI_API_KEY != "mock_key":
+                raise RuntimeError(f"Failed to parse AI job analysis JSON: {e}")
+
+    if AI_API_KEY != "mock_key":
+        raise RuntimeError("AI job analysis failed or timed out.")
+
+    return _mock_analyze_job(candidate_profile, job_dict)
+
+def _clean_job_analysis(analysis: Dict[str, Any], job_dict: Dict[str, Any] = None) -> Dict[str, Any]:
+    """Validates and cleans AI job analysis payload."""
+    score = float(analysis.get("score", 70))
+    score = max(0.0, min(100.0, score))
+    rec = analysis.get("recommendation", "consider")
+    if rec not in ["strong_match", "good_match", "consider", "stretch", "reject"]:
+        rec = "consider"
+        
+    matching = analysis.get("matching_requirements", [])
+    role_sum = analysis.get("role_summary", job_dict.get("title", "Software Engineering Role") if job_dict else "Software Engineering Role")
+    techs = analysis.get("key_technologies", matching[:3])
+    kp = analysis.get("key_points", [])
+    if not kp:
+        kp = [f"Focus: {role_sum}"]
+        if techs:
+            kp.append(f"Tech: {', '.join(techs[:3])}")
+        if job_dict and job_dict.get("location"):
+            kp.append(f"Location: {job_dict.get('location')}")
+
+    return {
+        "recommendation": rec,
+        "score": score,
+        "eligibility": bool(analysis.get("eligibility", True)),
+        "matching_requirements": matching,
+        "missing_preferred_skills": analysis.get("missing_preferred_skills", []),
+        "missing_critical_requirements": analysis.get("missing_critical_requirements", []),
+        "role_alignment": float(analysis.get("role_alignment", 75)),
+        "key_technologies": techs,
+        "role_summary": role_sum,
+        "key_points": kp[:3],
+        "extracted_salary": analysis.get("extracted_salary"),
+        "reason": analysis.get("reason", "Reasonable match based on candidate profile and skills.")
+    }
+
+def _mock_analyze_job(candidate_profile: Dict[str, Any], job_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Deterministic candidate-job match evaluation fallback."""
+    cand_skills = set(s.lower() for s in candidate_profile.get("skills", []))
+    desc = (job_dict.get("description", "") + " " + job_dict.get("title", "")).lower()
+    
+    matching = []
+    missing = []
+    
+    common_tech = ["python", "java", "c++", "sql", "flask", "django", "react", "machine learning", "git", "linux", "docker", "aws", "pytorch", "tensorflow", "azure"]
+    for tech in common_tech:
+        if tech in desc:
+            if tech in cand_skills or any(tech in cs.lower() for cs in candidate_profile.get("skills", [])):
+                matching.append(tech.title())
             else:
-                logger.error(f"Error calling AI API at {AI_BASE_URL} after {retries} attempts: {e}")
-                if AI_API_KEY != "mock_key":
-                    raise
-                return None
+                missing.append(tech.title())
+                
+    overlap_ratio = len(matching) / (len(matching) + len(missing)) if (matching or missing) else 0.7
+    score = min(98.0, max(50.0, 60.0 + overlap_ratio * 38.0))
+    
+    rec = "strong_match" if score >= 85 else ("good_match" if score >= 75 else "consider")
+    
+    techs = matching[:3] or ["Python", "Software Engineering"]
+    role_sum = f"Engineering role at {job_dict.get('company', 'Company')}"
+    key_pts = [
+        f"Role: {job_dict.get('title', 'Developer')}",
+        f"Tech Stack: {', '.join(techs)}",
+        f"Mode: {job_dict.get('location', 'Remote')}"
+    ]
+
+    return {
+        "recommendation": rec,
+        "score": round(score, 1),
+        "eligibility": True,
+        "matching_requirements": matching or ["Python", "Software Engineering"],
+        "missing_preferred_skills": missing[:3],
+        "missing_critical_requirements": [],
+        "role_alignment": round(score, 1),
+        "key_technologies": techs,
+        "role_summary": role_sum,
+        "key_points": key_pts,
+        "extracted_salary": None,
+        "reason": f"Matches key candidate skills ({', '.join(matching[:3]) if matching else 'core development'})."
+    }
 
 def parse_resume(cv_text: str) -> Dict[str, Any]:
     """
@@ -119,7 +353,7 @@ OUTPUT JSON SCHEMA:
     raw_response = _call_ai_api(prompt, system_prompt)
     if raw_response:
         try:
-            parsed = json.loads(raw_response)
+            parsed = robust_json_loads(raw_response)
             if isinstance(parsed, dict) and "name" in parsed:
                 return _clean_candidate_profile(parsed)
         except Exception as e:
@@ -254,7 +488,7 @@ OUTPUT JSON SCHEMA:
     raw_response = _call_ai_api(prompt, system_prompt)
     if raw_response:
         try:
-            parsed = json.loads(raw_response)
+            parsed = robust_json_loads(raw_response)
             if isinstance(parsed, dict) and "score" in parsed:
                 return _clean_job_analysis(parsed)
         except Exception as e:
@@ -318,6 +552,133 @@ def _mock_analyze_job(candidate_profile: Dict[str, Any], job_dict: Dict[str, Any
         "reason": f"Matches key candidate skills ({', '.join(matching[:3]) if matching else 'core development'})."
     }
 
+FORBIDDEN_FLUFF = [
+    "highly motivated", "passionate", "results-driven", "results driven",
+    "seasoned expert", "seasoned professional", "dynamic professional",
+    "experienced ai engineer", "expert engineer", "world-class", "rockstar"
+]
+
+def validate_tailored_resume(tailored_res: Dict[str, Any], candidate_profile: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Python Factuality Validation Layer:
+    Validates AI-generated tailored resume JSON against stored candidate profile source of truth.
+    Filters out hallucinated skills, fabricated projects, unknown experience entries, and invented metrics.
+    """
+    validated = dict(tailored_res)
+
+    # 1. Header Enforcement
+    validated["header"] = {
+        "name": candidate_profile.get("name") or "Candidate Name",
+        "email": candidate_profile.get("email") or "",
+        "phone": candidate_profile.get("phone") or "",
+        "links": candidate_profile.get("links") if isinstance(candidate_profile.get("links"), dict) else {}
+    }
+
+    # Build Master Candidate Skill Set
+    cand_skills_raw = candidate_profile.get("skills", [])
+    valid_skill_map = {s.lower().strip(): s for s in cand_skills_raw if isinstance(s, str)}
+    
+    # Also collect tech from candidate's projects
+    for p in candidate_profile.get("projects", []):
+        for tech in p.get("technologies", []):
+            if isinstance(tech, str) and tech.strip():
+                valid_skill_map[tech.lower().strip()] = tech.strip()
+
+    # 2. Skills Validation
+    skills = validated.get("skills")
+    if isinstance(skills, dict):
+        clean_skills = {}
+        for category, skill_list in skills.items():
+            if isinstance(skill_list, list):
+                valid_cat_skills = []
+                for sk in skill_list:
+                    if isinstance(sk, str) and sk.lower().strip() in valid_skill_map:
+                        valid_cat_skills.append(valid_skill_map[sk.lower().strip()])
+                clean_skills[category] = valid_cat_skills
+            else:
+                clean_skills[category] = []
+        if not any(clean_skills.values()):
+            clean_skills = {
+                "languages": [s for s in cand_skills_raw if s.lower() in ["python", "java", "c++", "sql", "javascript", "typescript", "html", "css"]],
+                "frameworks": [s for s in cand_skills_raw if s.lower() in ["flask", "django", "react", "pytorch", "tensorflow", "fastapi"]],
+                "tools": [s for s in cand_skills_raw if s.lower() not in ["python", "java", "c++", "sql", "javascript", "typescript", "html", "css", "flask", "django", "react", "pytorch", "tensorflow", "fastapi"]]
+            }
+        validated["skills"] = clean_skills
+    elif isinstance(skills, list):
+        valid_list = [valid_skill_map[sk.lower().strip()] for sk in skills if isinstance(sk, str) and sk.lower().strip() in valid_skill_map]
+        validated["skills"] = valid_list or cand_skills_raw
+
+    # 3. Experience Validation
+    cand_exp = candidate_profile.get("experience", [])
+    valid_exp_companies = {exp.get("company", "").lower().strip(): exp for exp in cand_exp if exp.get("company")}
+    
+    tailored_exp = validated.get("experience", [])
+    clean_exp = []
+    for item in tailored_exp:
+        comp_name = item.get("company", "").lower().strip() if isinstance(item, dict) else ""
+        if comp_name in valid_exp_companies:
+            orig_exp = valid_exp_companies[comp_name]
+            dates = f"{orig_exp.get('start_date', '')} - {orig_exp.get('end_date') or 'Present'}"
+            item["dates"] = dates
+            clean_exp.append(item)
+    validated["experience"] = clean_exp or [
+        {
+            "company": exp.get("company", "Company"),
+            "role": exp.get("role", "Role"),
+            "dates": f"{exp.get('start_date', '')} - {exp.get('end_date') or 'Present'}",
+            "bullets": exp.get("bullets", [])
+        } for exp in cand_exp
+    ]
+
+    # 4. Projects Validation
+    cand_proj = candidate_profile.get("projects", [])
+    valid_proj_names = {p.get("name", "").lower().strip(): p for p in cand_proj if p.get("name")}
+    
+    tailored_proj = validated.get("projects", [])
+    clean_proj = []
+    for item in tailored_proj:
+        p_name = item.get("name", "").lower().strip() if isinstance(item, dict) else ""
+        if p_name in valid_proj_names:
+            clean_proj.append(item)
+    validated["projects"] = clean_proj or [
+        {
+            "name": p.get("name", "Project"),
+            "technologies": ", ".join(p.get("technologies", [])),
+            "bullets": p.get("bullets", [p.get("description", "")])
+        } for p in cand_proj
+    ]
+
+    # 5. Metrics Verification
+    master_text = json.dumps(candidate_profile)
+    master_metrics = set(re.findall(r"\b\d+(?:%\b|\+\b|k\b|\.\d+)?", master_text.lower()))
+
+    for sec in ["experience", "projects"]:
+        for item in validated.get(sec, []):
+            if isinstance(item, dict) and "bullets" in item and isinstance(item["bullets"], list):
+                clean_bullets = []
+                for bullet in item["bullets"]:
+                    bullet_metrics = set(re.findall(r"\b\d+(?:%\b|\+\b|k\b|\.\d+)?", str(bullet).lower()))
+                    unsupported = bullet_metrics - master_metrics
+                    if unsupported:
+                        logger.warning(f"Rejecting unsupported metrics in bullet: {unsupported}")
+                        continue
+                    clean_bullets.append(bullet)
+                if not clean_bullets:
+                    orig_match = valid_exp_companies.get(item.get("company", "").lower().strip()) if sec == "experience" else valid_proj_names.get(item.get("name", "").lower().strip())
+                    clean_bullets = orig_match.get("bullets", []) if orig_match else ["Contributed to engineering solution."]
+                item["bullets"] = clean_bullets
+
+    # 6. Summary Sanitization
+    summary = validated.get("summary", "")
+    if summary and isinstance(summary, str):
+        summary_lower = summary.lower()
+        top_skills = ", ".join(cand_skills_raw[:3]) if cand_skills_raw else "software engineering"
+        if any(fluff in summary_lower for fluff in FORBIDDEN_FLUFF) or len(summary.strip()) < 20:
+            summary = f"Candidate with hands-on technical experience in {top_skills}, seeking a role aligned with candidate profile."
+        validated["summary"] = summary
+
+    return validated
+
 def tailor_resume(candidate_profile: Dict[str, Any], job_dict: Dict[str, Any], ai_analysis: Dict[str, Any], resume_settings: Dict[str, Any]) -> Dict[str, Any]:
     """
     Tailors candidate profile content into structured Resume JSON targeted specifically for the job posting.
@@ -327,91 +688,80 @@ def tailor_resume(candidate_profile: Dict[str, Any], job_dict: Dict[str, Any], a
         "You are an expert ATS resume tailoring engine. Your goal is to customize bullet points, summary, "
         "and skill groupings from the candidate profile to align with the job description. "
         "STRICT TRUTHFULNESS RULE: You must NEVER invent new projects, companies, dates, degrees, metrics, "
-        "or unsupported technical skills. Rephrase existing bullets truthfully using job terminology."
+        "or unsupported technical skills. Rephrase existing bullets truthfully using job terminology. "
+        "Your output must be a single, valid JSON object only. Escape all backslashes and double quotes inside string values. "
+        "Do NOT include raw newlines inside string values: escape them as \\n."
     )
     
-    links_json = json.dumps(candidate_profile.get('links', {}))
+    compact_cand = {
+        "name": candidate_profile.get("name"),
+        "email": candidate_profile.get("email"),
+        "phone": candidate_profile.get("phone"),
+        "skills": candidate_profile.get("skills", []),
+        "education": candidate_profile.get("education", []),
+        "experience": candidate_profile.get("experience", []),
+        "projects": candidate_profile.get("projects", [])
+    }
+    cand_str = json.dumps(compact_cand, separators=(',', ':'))
+
+    match_summary = {
+        "matching_skills": ai_analysis.get("matching_requirements", []),
+        "missing_skills": ai_analysis.get("missing_preferred_skills", [])
+    }
+    match_str = json.dumps(match_summary, separators=(',', ':'))
+
+    links_json = json.dumps(candidate_profile.get('links', {}), separators=(',', ':'))
+    desc_snippet = (job_dict.get('description', '') or '')[:1500]
+
     prompt = f"""
-Tailor the candidate resume for this job:
+Tailor the candidate resume for this job. Ensure you produce a valid JSON object matching the schema below. Escape any quotes and newlines in string properties.
 
-CANDIDATE PROFILE:
-{json.dumps(candidate_profile, indent=2)}
+CANDIDATE:
+{cand_str}
 
-JOB DETAILS:
+JOB:
 Company: {job_dict.get('company')}
 Title: {job_dict.get('title')}
-Description:
-{job_dict.get('description', '')[:3000]}
+Description: {desc_snippet}
 
-MATCH ANALYSIS:
-{json.dumps(ai_analysis, indent=2)}
-
-RESUME SETTINGS:
-Section Order: {json.dumps(resume_settings.get('section_order', []))}
+MATCH:
+{match_str}
 
 OUTPUT JSON SCHEMA:
 {{
-  "header": {{
-    "name": "{candidate_profile.get('name')}",
-    "email": "{candidate_profile.get('email')}",
-    "phone": "{candidate_profile.get('phone')}",
-    "links": {links_json}
-  }},
-  "summary": "Targeted 2-line professional summary highlighting candidate background relative to this role.",
-  "education": [
-    {{
-      "degree": "Degree",
-      "institution": "University",
-      "year": "2026",
-      "details": "GPA / Details"
-    }}
-  ],
-  "experience": [
-    {{
-      "company": "Company",
-      "role": "Role",
-      "dates": "June 2025 - Aug 2025",
-      "bullets": ["Tailored bullet 1", "Tailored bullet 2"]
-    }}
-  ],
-  "projects": [
-    {{
-      "name": "Project Name",
-      "technologies": "Python, SQL",
-      "bullets": ["Tailored project bullet 1"]
-    }}
-  ],
-  "skills": {{
-    "languages": ["Python", "SQL"],
-    "frameworks": ["Flask", "PyTorch"],
-    "tools": ["Git", "Linux"]
-  }},
-  "certifications": ["Cert 1"]
+  "header": {{"name": "{candidate_profile.get('name')}", "email": "{candidate_profile.get('email')}", "phone": "{candidate_profile.get('phone')}", "links": {links_json}}},
+  "summary": "2-line targeted summary.",
+  "education": [{{"degree": "Degree", "institution": "Institution", "year": "2026", "details": "GPA"}}],
+  "experience": [{{"company": "Company", "role": "Role", "dates": "Dates", "bullets": ["Bullet 1"]}}],
+  "projects": [{{"name": "Project Name", "technologies": "Python, SQL", "bullets": ["Bullet 1"]}}],
+  "skills": {{"languages": ["Python"], "frameworks": ["Flask"], "tools": ["Git"]}},
+  "certifications": []
 }}
 """
-    raw_response = _call_ai_api(prompt, system_prompt)
+    raw_response = _call_ai_api(prompt, system_prompt, max_tokens=4000)
     if raw_response:
         try:
-            parsed = json.loads(raw_response)
+            parsed = robust_json_loads(raw_response)
             if isinstance(parsed, dict) and "header" in parsed:
-                return parsed
+                return validate_tailored_resume(parsed, candidate_profile)
         except Exception as e:
-            logger.warning(f"Failed to parse AI resume tailoring JSON: {e}")
+            logger.warning(f"Failed to parse AI resume tailoring JSON: {e}. Raw response was: {raw_response}")
             if AI_API_KEY != "mock_key":
-                raise RuntimeError(f"Failed to parse AI resume tailoring JSON: {e}")
+                raise RuntimeError(f"Failed to parse AI resume tailoring JSON: {e}. Raw response was: {raw_response}")
 
     if AI_API_KEY != "mock_key":
         raise RuntimeError("AI resume tailoring failed or timed out.")
 
     # Fallback mock tailored resume
-    return _mock_tailor_resume(candidate_profile, job_dict, ai_analysis, resume_settings)
+    res = _mock_tailor_resume(candidate_profile, job_dict, ai_analysis, resume_settings)
+    return validate_tailored_resume(res, candidate_profile)
 
 def _mock_tailor_resume(candidate_profile: Dict[str, Any], job_dict: Dict[str, Any], ai_analysis: Dict[str, Any], resume_settings: Dict[str, Any]) -> Dict[str, Any]:
     """Deterministic resume content tailoring fallback."""
     title = job_dict.get("title", "Software Engineer")
     company = job_dict.get("company", "Company")
     
-    summary = f"Motivated candidate with strong foundation in {', '.join(candidate_profile.get('skills', ['software development'])[:3])}, targeting the {title} role at {company}."
+    summary = f"Candidate with hands-on technical experience in {', '.join(candidate_profile.get('skills', ['software development'])[:3])}, targeting the {title} role at {company}."
     
     education = []
     for ed in candidate_profile.get("education", []):

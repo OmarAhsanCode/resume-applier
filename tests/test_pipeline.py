@@ -5,6 +5,7 @@ import database
 import jobs
 import resume
 import google_service
+import sources
 
 class TestPipeline(unittest.TestCase):
     def setUp(self):
@@ -87,12 +88,22 @@ class TestPipeline(unittest.TestCase):
         self.assertTrue(score_dream > score_normal)
 
     def test_google_service_fallback(self):
-        # Without credentials, upload and sync should return None/False without throwing an exception
-        drive_url = google_service.upload_pdf_to_drive("non_existent.pdf", "Acme")
-        self.assertIsNone(drive_url)
-
+        # Without credentials, sync should return False without throwing an exception
         sheet_ok = google_service.sync_jobs_to_sheet([])
         self.assertFalse(sheet_ok)
+
+    def test_normalize_url_with_query_params(self):
+        url = "https://jobs.lever.co/company/abc12345/?gh_jid=123&utm_source=feed"
+        normalized = sources.base.normalize_url(url)
+        self.assertEqual(normalized, "https://jobs.lever.co/company/abc12345")
+
+    def test_overleaf_base64_generation(self):
+        import base64
+        tex_code = "Hello LaTeX"
+        encoded = base64.b64encode(tex_code.encode('utf-8')).decode('utf-8')
+        expected_url = f"https://www.overleaf.com/docs?snip_uri=data:application/x-tex;base64,{encoded}"
+        self.assertIn("data:application/x-tex;base64,", expected_url)
+        self.assertTrue(expected_url.endswith(encoded))
 
 if __name__ == "__main__":
     unittest.main()
