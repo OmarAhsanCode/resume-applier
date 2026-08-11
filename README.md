@@ -1,6 +1,6 @@
 # Personal Job Automation System — V1
 
-A personal, single-user job-search automation system built with **Python**, **Flask**, **SQLite**, **Requests / BeautifulSoup**, **Hosted Open-Source AI**, **LaTeX (`pdflatex`)**, and **Google Drive & Google Sheets APIs**.
+A personal, single-user job-search automation system built with **Python**, **Flask**, **SQLite**, **Requests / BeautifulSoup**, **Hosted Open-Source AI**, **LaTeX (`pdflatex`)**, and **Google Sheets API**.
 
 ---
 
@@ -12,9 +12,8 @@ A personal, single-user job-search automation system built with **Python**, **Fl
 4. **Conservative Hard Filtering**: Retains high-recall opportunities. Hard-filters only obvious profession/experience mismatches (never hard-filters missing skills).
 5. **Deterministic Ranking**: Scores jobs from 0–100 using weighted rules (Role 35%, Location 25%, Experience 20%, Employment Type 10%, Skill Overlap 10%, Dream Company Bonus +5 to +10 pts).
 6. **Hosted Open-Source AI Analysis**: Evaluates top candidate pool for semantic match recommendations. `final_score = deterministic_score * 0.60 + ai_score * 0.40`.
-7. **LaTeX Resume Tailoring**: Customizes bullet points and summaries using candidate truthfulness rules, escaping special characters, and compiling to single-page PDF resumes.
-8. **Google Integration**: Uploads PDFs to Google Drive and syncs application dashboard to Google Sheets.
-9. **Dashboard & Results UI**: Simple Flask/Jinja2/Vanilla JS web app displaying run progress polling, status actions (Applied, Saved, Rejected), and direct official application links.
+7. **LaTeX Resume Tailoring**: Customizes bullet points and summaries using candidate truthfulness rules, escaping special characters, and compiling to single-page PDF resumes or exporting to Overleaf.
+8. **Google Integration**: Syncs application dashboard to Google Sheets with custom Overleaf LaTeX compiler links.
 
 ---
 
@@ -41,8 +40,8 @@ Configured `.env` options:
 - `AI_BASE_URL`: Base URL (default: `https://api.groq.com/openai/v1`).
 - `AI_MODEL_NAME`: Model family (e.g. `llama-3.3-70b-versatile`, `qwen-2.5-72b`).
 - `PDFLATEX_PATH`: Path to `pdflatex` binary if not on PATH.
+- `LOCAL_BASE_URL`: Local URL of Flask app (default: `http://localhost:5000`).
 - `GOOGLE_CREDENTIALS_FILE`: Path to `credentials.json`.
-- `GOOGLE_DRIVE_FOLDER_ID`: Google Drive folder ID for generated resume PDFs.
 - `GOOGLE_SHEETS_SPREADSHEET_ID`: Google Spreadsheet ID for application sync.
 
 ---

@@ -12,7 +12,7 @@ AI_BASE_URL = os.getenv("AI_BASE_URL", "https://api.groq.com/openai/v1").rstrip(
 AI_MODEL_NAME = os.getenv("AI_MODEL_NAME", "llama-3.3-70b-versatile")
 
 def _call_ai_api(prompt: str, system_prompt: str = None) -> Optional[str]:
-    """Sends a chat completion request to an OpenAI-compatible API endpoint."""
+    """Sends a chat completion request to an OpenAI-compatible API endpoint with automatic retries for rate limits."""
     if not AI_API_KEY or AI_API_KEY == "mock_key":
         logger.info("AI_API_KEY is not set or set to mock_key. Utilizing mock fallback.")
         return None
@@ -34,16 +34,30 @@ def _call_ai_api(prompt: str, system_prompt: str = None) -> Optional[str]:
         "response_format": {"type": "json_object"}
     }
 
-    try:
-        url = f"{AI_BASE_URL}/chat/completions"
-        response = requests.post(url, headers=headers, json=payload, timeout=45)
-        response.raise_for_status()
-        data = response.json()
-        content = data["choices"][0]["message"]["content"]
-        return content
-    except Exception as e:
-        logger.error(f"Error calling AI API at {AI_BASE_URL}: {e}")
-        return None
+    import time
+    retries = 3
+    for attempt in range(retries):
+        delay = 6 * (attempt + 1)
+        try:
+            url = f"{AI_BASE_URL}/chat/completions"
+            response = requests.post(url, headers=headers, json=payload, timeout=45)
+            if response.status_code == 429:
+                logger.warning(f"Rate limit hit (429). Retrying in {delay}s... (Attempt {attempt+1}/{retries})")
+                time.sleep(delay)
+                continue
+            response.raise_for_status()
+            data = response.json()
+            content = data["choices"][0]["message"]["content"]
+            return content
+        except Exception as e:
+            if attempt < retries - 1:
+                logger.warning(f"API error: {e}. Retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                logger.error(f"Error calling AI API at {AI_BASE_URL} after {retries} attempts: {e}")
+                if AI_API_KEY != "mock_key":
+                    raise
+                return None
 
 def parse_resume(cv_text: str) -> Dict[str, Any]:
     """
@@ -109,7 +123,12 @@ OUTPUT JSON SCHEMA:
             if isinstance(parsed, dict) and "name" in parsed:
                 return _clean_candidate_profile(parsed)
         except Exception as e:
-            logger.warning(f"Failed to parse AI CV output: {e}. Falling back to deterministic parsing.")
+            logger.warning(f"Failed to parse AI CV output: {e}.")
+            if AI_API_KEY != "mock_key":
+                raise RuntimeError(f"Failed to parse AI CV output: {e}")
+
+    if AI_API_KEY != "mock_key":
+        raise RuntimeError("AI CV parsing failed or timed out.")
 
     # Deterministic Mock Fallback for offline/unconfigured API
     return _mock_parse_resume(cv_text)
@@ -240,6 +259,11 @@ OUTPUT JSON SCHEMA:
                 return _clean_job_analysis(parsed)
         except Exception as e:
             logger.warning(f"Failed to parse AI job analysis JSON: {e}")
+            if AI_API_KEY != "mock_key":
+                raise RuntimeError(f"Failed to parse AI job analysis JSON: {e}")
+
+    if AI_API_KEY != "mock_key":
+        raise RuntimeError("AI job analysis failed or timed out.")
 
     # Fallback deterministic analysis
     return _mock_analyze_job(candidate_profile, job_dict)
@@ -373,6 +397,11 @@ OUTPUT JSON SCHEMA:
                 return parsed
         except Exception as e:
             logger.warning(f"Failed to parse AI resume tailoring JSON: {e}")
+            if AI_API_KEY != "mock_key":
+                raise RuntimeError(f"Failed to parse AI resume tailoring JSON: {e}")
+
+    if AI_API_KEY != "mock_key":
+        raise RuntimeError("AI resume tailoring failed or timed out.")
 
     # Fallback mock tailored resume
     return _mock_tailor_resume(candidate_profile, job_dict, ai_analysis, resume_settings)

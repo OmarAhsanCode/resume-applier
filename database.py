@@ -371,6 +371,13 @@ def get_job_by_id(job_id: int, db_path: str = None) -> Optional[Dict[str, Any]]:
             pass
     return data
 
+def delete_job_by_id(job_id: int, db_path: str = None) -> None:
+    """Deletes a single job by DB ID."""
+    conn = get_connection(db_path)
+    conn.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+    conn.commit()
+    conn.close()
+
 def get_all_jobs(status_filter: str = None, limit: int = 100, db_path: str = None) -> List[Dict[str, Any]]:
     """Returns jobs, optionally filtered by status, ordered by final_score descending or created_at descending."""
     conn = get_connection(db_path)

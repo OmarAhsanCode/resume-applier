@@ -240,7 +240,7 @@ def run_job_search_pipeline(
 
         # Step 4: Sort by deterministic score and pick top pool for AI analysis
         valid_candidate_jobs.sort(key=lambda j: j["deterministic_score"], reverse=True)
-        ai_pool_size = min(len(valid_candidate_jobs), max(requested_jobs * 2, 50))
+        ai_pool_size = min(len(valid_candidate_jobs), max(requested_jobs * 2, 10))
         ai_candidate_pool = valid_candidate_jobs[:ai_pool_size]
 
         # Step 5: AI Job Deep Analysis
@@ -250,32 +250,50 @@ def run_job_search_pipeline(
 
         for idx, job in enumerate(ai_candidate_pool, 1):
             report_progress("AI Analysis", f"Analyzing job {idx}/{len(ai_candidate_pool)}: {job['title']} at {job['company']}")
-            analysis = ai.analyze_job(profile, job)
-            ai_score = float(analysis.get("score", job["deterministic_score"]))
+            try:
+                analysis = ai.analyze_job(profile, job)
+                ai_score = float(analysis.get("score", job["deterministic_score"]))
 
-            # Final Score Formula: 60% Deterministic + 40% AI
-            final_score = round((job["deterministic_score"] * 0.60) + (ai_score * 0.40), 1)
+                # Final Score Formula: 60% Deterministic + 40% AI
+                final_score = round((job["deterministic_score"] * 0.60) + (ai_score * 0.40), 1)
 
-            job["ai_score"] = ai_score
-            job["final_score"] = final_score
-            job["ai_analysis"] = analysis
+                job["ai_score"] = ai_score
+                job["final_score"] = final_score
+                job["ai_analysis"] = analysis
 
-            database.update_job_evaluation(
-                job_id=job["id"],
-                deterministic_score=job["deterministic_score"],
-                ai_score=ai_score,
-                final_score=final_score,
-                ai_analysis=analysis,
-                db_path=db_path
-            )
-            scored_jobs.append(job)
-            analyzed_count += 1
+                database.update_job_evaluation(
+                    job_id=job["id"],
+                    deterministic_score=job["deterministic_score"],
+                    ai_score=ai_score,
+                    final_score=final_score,
+                    ai_analysis=analysis,
+                    db_path=db_path
+                )
+                scored_jobs.append(job)
+                analyzed_count += 1
+                import time
+                time.sleep(3)
+            except Exception as e:
+                logger.error(f"Error during AI analysis for job #{job['id']} ({job['title']}) at {job['company']}: {e}")
+                try:
+                    database.delete_job_by_id(job["id"], db_path=db_path)
+                except Exception as del_err:
+                    logger.error(f"Error deleting failed job #{job['id']}: {del_err}")
 
         report_progress("AI Analysis", f"AI Analysis completed for {analyzed_count} jobs.", {"analyzed_count": analyzed_count})
 
-        # Step 6: Select Top N jobs
+        # Step 6: Select Top N jobs (with a max of 2 jobs per company for diversity)
         scored_jobs.sort(key=lambda j: j["final_score"], reverse=True)
-        selected_jobs = scored_jobs[:requested_jobs]
+        selected_jobs = []
+        company_counts = {}
+        for job in scored_jobs:
+            if len(selected_jobs) >= requested_jobs:
+                break
+            comp = job.get("company", "").strip().lower()
+            if company_counts.get(comp, 0) < 2:
+                selected_jobs.append(job)
+                company_counts[comp] = company_counts.get(comp, 0) + 1
+                
         selected_count = len(selected_jobs)
 
         for s_job in selected_jobs:
@@ -305,24 +323,18 @@ def run_job_search_pipeline(
                 with open(tex_path, "w", encoding="utf-8") as f:
                     f.write(latex_code)
 
-                # PDF Compilation attempt
-                pdf_ok, pdf_path, pdf_log = resume.compile_pdf(tex_path, "generated/resumes")
-                drive_url = None
-
-                if pdf_ok and pdf_path:
-                    resume_success_count += 1
-                    # Upload to Google Drive if configured
-                    drive_url = google_service.upload_pdf_to_drive(pdf_path, s_job["company"])
-                else:
-                    resume_error_count += 1
-                    logger.warning(f"Resume PDF compilation notice for job #{s_job['id']}: {pdf_log}")
+                # Generate local Overleaf redirect URL
+                resume_success_count += 1
+                base_url = os.getenv("LOCAL_BASE_URL", "http://localhost:5000")
+                overleaf_url = f"{base_url}/jobs/{s_job['id']}/overleaf"
+                s_job["drive_url"] = overleaf_url
 
                 database.update_job_resume(
                     job_id=s_job["id"],
                     resume_json=tailored_res,
                     tex_path=tex_path,
-                    pdf_path=pdf_path if pdf_ok else None,
-                    drive_url=drive_url,
+                    pdf_path=None,
+                    drive_url=overleaf_url,
                     status="selected",
                     db_path=db_path
                 )

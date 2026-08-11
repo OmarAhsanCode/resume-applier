@@ -244,7 +244,12 @@ def run_status():
 @app.route("/results")
 def results():
     status_filter = request.args.get("status")
-    all_jobs = database.get_all_jobs(status_filter=status_filter, limit=100)
+    if not status_filter:
+        # Show only processed/selected jobs, excluding raw 'new' ones
+        all_jobs = database.get_all_jobs(limit=100)
+        all_jobs = [j for j in all_jobs if j.get("status") != 'new']
+    else:
+        all_jobs = database.get_all_jobs(status_filter=status_filter, limit=100)
     return render_template("results.html", jobs=all_jobs, current_filter=status_filter)
 
 @app.route("/jobs/<int:job_id>/applied", methods=["POST"])
@@ -257,10 +262,49 @@ def mark_rejected(job_id):
     database.update_job_status(job_id, "rejected")
     return jsonify({"status": "success", "message": "Job marked as Rejected."})
 
-@app.route("/jobs/<int:job_id>/saved", methods=["POST"])
-def mark_saved(job_id):
-    database.update_job_status(job_id, "saved")
-    return jsonify({"status": "success", "message": "Job saved."})
+@app.route("/jobs/<int:job_id>/overleaf")
+def open_in_overleaf(job_id):
+    from flask import render_template_string
+    job = database.get_job_by_id(job_id)
+    if not job:
+        flash("Job not found.", "error")
+        return redirect(url_for("results"))
+        
+    tex_code = ""
+    tex_path = job.get("resume_tex_path")
+    if tex_path and os.path.exists(tex_path):
+        try:
+            with open(tex_path, "r", encoding="utf-8") as f:
+                tex_code = f.read()
+        except Exception as e:
+            logger.error(f"Error reading tex file: {e}")
+            
+    if not tex_code and job.get("resume_json"):
+        try:
+            tex_code = resume.render_latex(job["resume_json"])
+        except Exception as e:
+            logger.error(f"Error rendering latex from json: {e}")
+            
+    if not tex_code:
+        flash("Resume source code not available.", "error")
+        return redirect(url_for("results"))
+        
+    template = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Redirecting to Overleaf...</title>
+</head>
+<body>
+    <p>Opening your tailored resume in Overleaf, please wait...</p>
+    <form id="overleafForm" action="https://www.overleaf.com/docs" method="POST">
+        <input type="hidden" name="snip" value="{{ tex_code }}">
+    </form>
+    <script>
+        document.getElementById('overleafForm').submit();
+    </script>
+</body>
+</html>"""
+    return render_template_string(template, tex_code=tex_code)
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))

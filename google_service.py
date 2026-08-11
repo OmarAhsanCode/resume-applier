@@ -24,7 +24,6 @@ def get_google_credentials():
         from google.auth.transport.requests import Request
 
         SCOPES = [
-            'https://www.googleapis.com/auth/drive.file',
             'https://www.googleapis.com/auth/spreadsheets'
         ]
         
@@ -47,52 +46,24 @@ def get_google_credentials():
         return None
 
 def initialize_google_drive():
-    """Initializes Google Drive and Sheets API clients if credentials exist."""
-    global _drive_service, _sheets_service
+    """Initializes Google Sheets API client if credentials exist."""
+    global _sheets_service
     creds = get_google_credentials()
     if not creds:
-        logger.info("Google API credentials not configured. Remote Drive/Sheets sync will be skipped.")
+        logger.info("Google API credentials not configured. Remote Sheets sync will be skipped.")
         return False
         
     try:
         from googleapiclient.discovery import build
-        _drive_service = build('drive', 'v3', credentials=creds)
         _sheets_service = build('sheets', 'v4', credentials=creds)
         return True
     except Exception as e:
-        logger.warning(f"Failed to build Google services: {e}")
+        logger.warning(f"Failed to build Google Sheets service: {e}")
         return False
 
 def upload_pdf_to_drive(pdf_path: str, company_name: str) -> Optional[str]:
-    """
-    Uploads generated resume PDF to Google Drive folder.
-    Returns sharable file link or None.
-    """
-    global _drive_service
-    if not _drive_service:
-        return None
-
-    if not os.path.exists(pdf_path):
-        return None
-
-    try:
-        from googleapiclient.http import MediaFileUpload
-
-        file_name = os.path.basename(pdf_path)
-        file_metadata = {
-            'name': file_name,
-            'parents': [GOOGLE_DRIVE_FOLDER_ID] if GOOGLE_DRIVE_FOLDER_ID else []
-        }
-        
-        media = MediaFileUpload(pdf_path, mimetype='application/pdf')
-        file_obj = _drive_service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
-        
-        drive_url = file_obj.get('webViewLink')
-        logger.info(f"Successfully uploaded {file_name} to Google Drive: {drive_url}")
-        return drive_url
-    except Exception as e:
-        logger.error(f"Error uploading PDF to Google Drive: {e}")
-        return None
+    """Stub upload_pdf_to_drive function - Google Drive is disabled in favor of Overleaf."""
+    return None
 
 def sync_jobs_to_sheet(selected_jobs: List[Dict[str, Any]]) -> bool:
     """

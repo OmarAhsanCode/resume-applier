@@ -55,9 +55,9 @@
                 </td>
                 <td class="cell-resume">
                     {% if job.drive_url %}
-                        <a href="{{ job.drive_url }}" target="_blank" class="btn btn-sm btn-drive">☁ Drive PDF</a>
+                        <a href="{{ job.drive_url }}" target="_blank" class="btn btn-sm btn-drive">✏ Open Overleaf</a>
                     {% elif job.resume_tex_path %}
-                        <span class="tex-ready">✓ .tex ready</span>
+                        <a href="{{ url_for('open_in_overleaf', job_id=job.id) }}" target="_blank" class="btn btn-sm btn-drive">✏ Open Overleaf</a>
                     {% else %}
                         <span class="muted">Pending</span>
                     {% endif %}

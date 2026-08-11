@@ -29,9 +29,9 @@ The goal is to:
 7. Use a hosted open-source AI model for deeper semantic job analysis.
 8. Select the best jobs.
 9. Tailor the user's resume for each selected job.
-10. Generate PDFs through a fixed LaTeX template.
-11. Upload generated PDFs to Google Drive.
-12. Store job/application information and links in Google Sheets.
+10. Generate LaTeX source files through a fixed template.
+11. Generate Overleaf redirect links for the generated LaTeX code.
+12. Store job/application information and Overleaf links in Google Sheets.
 
 The application is **not a SaaS product**.
 
@@ -106,7 +106,6 @@ Use the following stack.
 
 ## Google
 
-- Google Drive API
 - Google Sheets API
 
 ---
@@ -235,7 +234,6 @@ Do not use AI for:
 - file naming
 - LaTeX compilation
 - PDF generation
-- Google Drive operations
 - Google Sheets operations
 - application status updates
 
@@ -723,25 +721,15 @@ Never allow one bad resume to kill the entire run.
 
 ---
 
-# 26. Google Drive
+# 26. Overleaf Redirect
 
-Successful PDFs should be uploaded to Google Drive.
+Successful LaTeX resumes should be accessible via a local Flask redirect route.
 
-Suggested organization:
+After generation:
 
-```text
-Job Applications/
-    2026/
-        Company A/
-        Company B/
-        Company C/
-```
-
-After upload:
-
-- save the Drive file URL
+- save the local Overleaf link
 - associate it with the corresponding job
-- expose it in the results
+- expose it in the results page
 
 ---
 
@@ -772,7 +760,7 @@ Date Applied
 
 The Job URL must point to the official application page.
 
-The Resume URL must point to the generated Google Drive PDF.
+The Resume URL must point to the local Flask `/jobs/<id>/overleaf` route which auto-redirects to Overleaf.
 
 ---
 
@@ -1340,7 +1328,7 @@ The V1 application is successful when the user can:
 7. Avoid previously seen jobs through stable ID deduplication.
 8. Receive ranked jobs.
 9. Receive tailored LaTeX-generated PDF resumes.
-10. Find the resumes in Google Drive.
+10. Open the resumes in Overleaf.
 11. Find the job/application links in Google Sheets.
 12. Apply manually.
 13. Mark jobs as Applied/Saved/Rejected.
@@ -1370,8 +1358,6 @@ Public Job Sources
 Hosted Open-Source AI
   +
 LaTeX
-  +
-Google Drive
   +
 Google Sheets
 ```

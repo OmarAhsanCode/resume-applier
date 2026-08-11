@@ -5,7 +5,7 @@
 **Project type:** Personal automation / portfolio project\
 **Primary goal:** Find new, relevant jobs on demand, rank them against a
 persistent candidate profile, generate a tailored LaTeX resume for each
-selected job, upload the PDFs to Google Drive, and organize the results
+selected job, generate Overleaf redirect links for the resumes, and organize the results
 in Google Sheets.
 
 ------------------------------------------------------------------------
@@ -46,11 +46,9 @@ The application then:
 10. Selects the best requested number of jobs.
 11. Uses AI to tailor the resume content for each selected job.
 12. Inserts the structured resume content into a fixed LaTeX template.
-13. Compiles the LaTeX document into a PDF.
-14. Uploads each PDF to Google Drive.
-15. Adds the job, score, reasoning, application link, and resume link to
-    Google Sheets.
-16. Shows a completion summary and any errors.
+13. Generates Overleaf redirect links for the generated LaTeX code.
+14. Adds the job, score, reasoning, application link, and Overleaf resume link to Google Sheets.
+15. Shows a completion summary and any errors.
 
 The system is deliberately **not** intended to be a SaaS product,
 multi-user application, or autonomous application-submission bot.
@@ -1715,38 +1713,24 @@ Microsoft_AI_Intern_greenhouse_123456.pdf
 
 ------------------------------------------------------------------------
 
-# 40. Google Drive Workflow
+# 40. Overleaf Redirect Workflow
 
-For every successful PDF:
-
-``` text
-PDF
- |
- v
-Google Drive API
- |
- v
-Upload
- |
- v
-Receive file ID / URL
- |
- v
-Save drive_url in jobs table
-```
-
-Suggested folder structure:
+For every successful LaTeX resume generation:
 
 ``` text
-Job Applications/
-    2026/
-        Microsoft/
-        Google/
-        NVIDIA/
-        Amazon/
+LaTeX Source Code
+ |
+ v
+Saved to Local File / DB
+ |
+ v
+Generate Local Flask Redirect Link (http://localhost:5000/jobs/<id>/overleaf)
+ |
+ v
+Save link in jobs table as resume URL
 ```
 
-V1 can create folders automatically if they do not exist.
+When clicked, the link opens a Flask route that auto-submits a POST request to Overleaf's API with the LaTeX content.
 
 ------------------------------------------------------------------------
 
@@ -1790,7 +1774,7 @@ Example:
 The application URL should point directly to the official application
 page.
 
-The resume URL should point to the generated Google Drive PDF.
+The resume URL should point to the local Flask `/jobs/<id>/overleaf` route which auto-redirects to Overleaf.
 
 ------------------------------------------------------------------------
 
