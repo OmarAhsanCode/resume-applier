@@ -1,0 +1,69 @@
+{
+  "greenhouse": [
+    "stripe",
+    "figma",
+    "github",
+    "discord",
+    "gitlab",
+    "datadog",
+    "canonical",
+    "doordash"
+  ],
+  "lever": [
+    "palantir",
+    "netflix",
+    "spotify",
+    "postman",
+    "scaleai",
+    "chime"
+  ],
+  "ashby": [
+    "ramp",
+    "linear",
+    "retool",
+    "notion",
+    "airtable",
+    "openaipublic"
+  ],
+  "workday": [
+    {
+      "company": "Adobe",
+      "host": "adobe.wd5.myworkdayjobs.com",
+      "tenant": "external_careers"
+    },
+    {
+      "company": "Salesforce",
+      "host": "salesforce.wd12.myworkdayjobs.com",
+      "tenant": "External_Career_Site"
+    },
+    {
+      "company": "NVIDIA",
+      "host": "nvidia.wd5.myworkdayjobs.com",
+      "tenant": "NVIDIAExternalCareerSite"
+    }
+  ],
+  "smartrecruiters": [
+    "Square",
+    "Visa",
+    "Bosch",
+    "Ubisoft"
+  ],
+  "taleo": [
+    {
+      "company": "Oracle",
+      "career_url": "https://oracle.taleo.net/careersection/2/jobsearch.ftl"
+    }
+  ],
+  "icims": [
+    {
+      "company": "Microsoft",
+      "portal_url": "https://careers.microsoft.com"
+    }
+  ],
+  "adzuna": {
+    "app_id": "",
+    "app_key": "",
+    "country": "in",
+    "enabled": false
+  }
+}

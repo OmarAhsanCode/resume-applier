@@ -116,7 +116,13 @@ function generateResume(jobId, buttonEl) {
             showToast('Resume created successfully.', 'success');
             const cell = document.getElementById(`resume-cell-${jobId}`);
             if (cell) {
-                cell.innerHTML = `<a href="${result.body.overleaf_url}" target="_blank" class="btn btn-sm btn-drive">✏ Open in Overleaf</a>`;
+                cell.innerHTML = `
+                    <span class="resume-created-badge" style="font-weight: bold; color: var(--success-color, #2ecc71); display: block; margin-bottom: 4px;">✓ Created</span>
+                    <div class="resume-actions-container" style="display: flex; flex-direction: column; gap: 4px;">
+                        <a href="${result.body.view_url}" target="_blank" class="btn btn-sm btn-outline btn-open-tex" style="padding: 2px 8px; font-size: 0.8rem; text-align: center; border-radius: 4px;">Open .tex</a>
+                        <a href="${result.body.download_url}" class="btn btn-sm btn-outline btn-download-tex" style="padding: 2px 8px; font-size: 0.8rem; text-align: center; border-radius: 4px;">Download .tex</a>
+                    </div>
+                `;
             }
         } else {
             const msg = (result.body && result.body.message) ? result.body.message : 'Resume generation failed. Please try again.';

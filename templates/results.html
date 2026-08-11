@@ -17,6 +17,10 @@
 </div>
 
 {% if jobs %}
+<div class="alert alert-info discovery-summary-banner" style="margin-bottom: 20px; padding: 12px 16px; background: #eef6ff; border-left: 4px solid #0066cc; border-radius: 4px;">
+    <strong>Discovery Summary:</strong> Displaying {{ jobs|length }} job opportunities found across active ATS adapters and company portals.
+</div>
+
 <div class="card table-card">
     <table class="data-table">
         <thead>
@@ -68,7 +72,11 @@
                 </td>
                 <td class="cell-resume" id="resume-cell-{{ job.id }}">
                     {% if job.resume_tex_path or job.resume_json %}
-                        <a href="{{ url_for('open_in_overleaf', job_id=job.id) }}" target="_blank" class="btn btn-sm btn-drive">✏ Open in Overleaf</a>
+                        <span class="resume-created-badge" style="font-weight: bold; color: var(--success-color, #2ecc71); display: block; margin-bottom: 4px;">✓ Created</span>
+                        <div class="resume-actions-container" style="display: flex; flex-direction: column; gap: 4px;">
+                            <a href="{{ url_for('view_resume', job_id=job.id) }}" target="_blank" class="btn btn-sm btn-outline btn-open-tex" style="padding: 2px 8px; font-size: 0.8rem; text-align: center; border-radius: 4px;">Open .tex</a>
+                            <a href="{{ url_for('download_resume', job_id=job.id) }}" class="btn btn-sm btn-outline btn-download-tex" style="padding: 2px 8px; font-size: 0.8rem; text-align: center; border-radius: 4px;">Download .tex</a>
+                        </div>
                     {% else %}
                         <button id="resume-btn-{{ job.id }}" onclick="generateResume('{{ job.id }}', this)" class="btn btn-sm btn-primary btn-generate-resume">Generate Resume</button>
                     {% endif %}

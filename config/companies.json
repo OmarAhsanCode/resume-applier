@@ -1,0 +1,82 @@
+[
+  {
+    "company": "Microsoft India",
+    "careers_url": "https://careers.microsoft.com",
+    "source": "icims",
+    "source_identifier": "microsoft",
+    "country": "India",
+    "enabled": true
+  },
+  {
+    "company": "Google India",
+    "careers_url": "https://www.google.com/about/careers/applications/jobs/results/",
+    "source": "greenhouse",
+    "source_identifier": "google",
+    "country": "India",
+    "enabled": true
+  },
+  {
+    "company": "Amazon India",
+    "careers_url": "https://www.amazon.jobs",
+    "source": "workday",
+    "source_identifier": "amazon",
+    "country": "India",
+    "enabled": true
+  },
+  {
+    "company": "Flipkart",
+    "careers_url": "https://www.flipkartcareers.com",
+    "source": "greenhouse",
+    "source_identifier": "flipkart",
+    "country": "India",
+    "enabled": true
+  },
+  {
+    "company": "Swiggy",
+    "careers_url": "https://careers.swiggy.com",
+    "source": "lever",
+    "source_identifier": "swiggy",
+    "country": "India",
+    "enabled": true
+  },
+  {
+    "company": "Zomato",
+    "careers_url": "https://www.zomato.com/careers",
+    "source": "lever",
+    "source_identifier": "zomato",
+    "country": "India",
+    "enabled": true
+  },
+  {
+    "company": "Razorpay",
+    "careers_url": "https://razorpay.com/jobs",
+    "source": "greenhouse",
+    "source_identifier": "razorpay",
+    "country": "India",
+    "enabled": true
+  },
+  {
+    "company": "PhonePe",
+    "careers_url": "https://www.phonepe.com/careers",
+    "source": "ashby",
+    "source_identifier": "phonepe",
+    "country": "India",
+    "enabled": true
+  },
+  {
+    "company": "Postman",
+    "careers_url": "https://www.postman.com/company/careers",
+    "source": "lever",
+    "source_identifier": "postman",
+    "country": "India",
+    "enabled": true
+  },
+  {
+    "company": "Uber India",
+    "careers_url": "https://www.uber.com/us/en/careers",
+    "source": "greenhouse",
+    "source_identifier": "uber",
+    "country": "India",
+    "enabled": true
+  }
+]

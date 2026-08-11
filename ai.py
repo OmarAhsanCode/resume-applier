@@ -207,12 +207,8 @@ OUTPUT JSON SCHEMA:
                 return _clean_job_analysis(parsed, job_dict)
         except Exception as e:
             logger.warning(f"Failed to parse AI job analysis JSON: {e}")
-            if AI_API_KEY != "mock_key":
-                raise RuntimeError(f"Failed to parse AI job analysis JSON: {e}")
 
-    if AI_API_KEY != "mock_key":
-        raise RuntimeError("AI job analysis failed or timed out.")
-
+    logger.warning("AI job analysis failed or timed out. Falling back to deterministic analysis.")
     return _mock_analyze_job(candidate_profile, job_dict)
 
 def _clean_job_analysis(analysis: Dict[str, Any], job_dict: Dict[str, Any] = None) -> Dict[str, Any]:
@@ -598,10 +594,17 @@ def validate_tailored_resume(tailored_res: Dict[str, Any], candidate_profile: Di
             else:
                 clean_skills[category] = []
         if not any(clean_skills.values()):
+            master_skills = list(cand_skills_raw)
+            for p in candidate_profile.get("projects", []):
+                for tech in p.get("technologies", []):
+                    if tech not in master_skills:
+                        master_skills.append(tech)
+            languages_list = ["python", "java", "c++", "sql", "javascript", "typescript", "html", "css", "node.js", "r", "go", "bash"]
+            frameworks_list = ["flask", "django", "react", "react 18", "streamlit", "pytorch", "tensorflow", "fastapi", "scikit-learn", "pandas", "xgboost", "selenium", "beautifulsoup4", "langchain", "tailwind css", "vite", "bootstrap", "jquery"]
             clean_skills = {
-                "languages": [s for s in cand_skills_raw if s.lower() in ["python", "java", "c++", "sql", "javascript", "typescript", "html", "css"]],
-                "frameworks": [s for s in cand_skills_raw if s.lower() in ["flask", "django", "react", "pytorch", "tensorflow", "fastapi"]],
-                "tools": [s for s in cand_skills_raw if s.lower() not in ["python", "java", "c++", "sql", "javascript", "typescript", "html", "css", "flask", "django", "react", "pytorch", "tensorflow", "fastapi"]]
+                "languages": [s for s in master_skills if s.lower() in languages_list],
+                "frameworks": [s for s in master_skills if s.lower() in frameworks_list],
+                "tools": [s for s in master_skills if s.lower() not in languages_list and s.lower() not in frameworks_list]
             }
         validated["skills"] = clean_skills
     elif isinstance(skills, list):
@@ -752,7 +755,7 @@ OUTPUT JSON SCHEMA:
     if AI_API_KEY != "mock_key":
         raise RuntimeError("AI resume tailoring failed or timed out.")
 
-    # Fallback mock tailored resume
+    logger.warning("AI resume tailoring failed or timed out. Falling back to deterministic resume tailoring.")
     res = _mock_tailor_resume(candidate_profile, job_dict, ai_analysis, resume_settings)
     return validate_tailored_resume(res, candidate_profile)
 
@@ -791,11 +794,19 @@ def _mock_tailor_resume(candidate_profile: Dict[str, Any], job_dict: Dict[str, A
             "bullets": proj.get("bullets", [proj.get("description", "Built application solution.")])
         })
         
-    all_skills = candidate_profile.get("skills", [])
+    all_skills = list(candidate_profile.get("skills", []))
+    for p in candidate_profile.get("projects", []):
+        for tech in p.get("technologies", []):
+            if tech not in all_skills:
+                all_skills.append(tech)
+
+    languages_list = ["python", "java", "c++", "sql", "javascript", "typescript", "html", "css", "node.js", "r", "go", "bash"]
+    frameworks_list = ["flask", "django", "react", "react 18", "streamlit", "pytorch", "tensorflow", "fastapi", "scikit-learn", "pandas", "xgboost", "selenium", "beautifulsoup4", "langchain", "tailwind css", "vite", "bootstrap", "jquery"]
+
     skills_dict = {
-        "languages": [s for s in all_skills if s.lower() in ["python", "java", "c++", "sql", "javascript", "typescript", "html", "css"]],
-        "frameworks": [s for s in all_skills if s.lower() in ["flask", "django", "react", "pytorch", "tensorflow", "fastapi"]],
-        "tools": [s for s in all_skills if s.lower() not in ["python", "java", "c++", "sql", "javascript", "typescript", "html", "css", "flask", "django", "react", "pytorch", "tensorflow", "fastapi"]]
+        "languages": [s for s in all_skills if s.lower() in languages_list],
+        "frameworks": [s for s in all_skills if s.lower() in frameworks_list],
+        "tools": [s for s in all_skills if s.lower() not in languages_list and s.lower() not in frameworks_list]
     }
     
     return {

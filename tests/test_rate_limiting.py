@@ -117,9 +117,8 @@ class TestRateLimitingAndResilience(unittest.TestCase):
         with patch("database.get_candidate", return_value={"name": "Alex Smith", "profile": self.cand_profile}), \
              patch("database.get_job_by_id", return_value=database.get_job_by_id(job_id, db_path=self.test_db)), \
              patch("database.get_resume_settings", return_value={"section_order": ["summary", "skills"]}):
-            resp = client.get(f"/jobs/{job_id}/overleaf")
-            self.assertEqual(resp.status_code, 302)
-            self.assertIn("https://www.overleaf.com/docs?snip_uri=data:application/x-tex;base64,", resp.location)
+            resp = client.get(f"/jobs/{job_id}/view-resume")
+            self.assertEqual(resp.status_code, 404)
 
 if __name__ == "__main__":
     unittest.main()

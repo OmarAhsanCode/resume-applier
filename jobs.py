@@ -61,7 +61,11 @@ def is_hard_filtered(job: Dict[str, Any], preferences: Dict[str, Any], candidate
     pref_locations = [l.lower() for l in preferences.get("locations", [])]
     pref_exp_levels = [e.lower() for e in preferences.get("experience_levels", [])]
 
-    # Rule 1: Obvious profession mismatch
+    # Rule 1: Obvious profession mismatch & negative title filtering
+    is_neg, neg_reason = sources.base.is_negative_title_match(job.get("title", ""))
+    if is_neg:
+        return True, neg_reason
+
     unrelated_keywords = ["registered nurse", "cashier", "truck driver", "store manager", "customer service representative", "medical assistant", "dental hygienist"]
     if any(ukw in title for ukw in unrelated_keywords):
         return True, f"Role profession mismatch: '{title}'"
@@ -102,12 +106,54 @@ def is_hard_filtered(job: Dict[str, Any], preferences: Dict[str, Any], candidate
             if is_explicit_fulltime and not has_intern_title and not has_entry_title:
                 return True, f"Explicit full-time non-entry-level role mismatch: '{title}'"
 
-    # Rule 3: Location mismatch (conservative)
+    # Rule 3: Location mismatch (deterministic)
     if pref_locations:
-        is_remote_job = "remote" in location or "remote" in title or "work from home" in description[:300]
-        location_matched = is_remote_job or any(pl in location for pl in pref_locations if pl != "remote")
-        if not location_matched and "onsite" in location and not any(loc in location for loc in ["india", "us", "usa", "anywhere"]):
-            pass
+        job_loc = (job.get("location") or "").lower().strip()
+        job_title = (job.get("title") or "").lower().strip()
+        
+        # Determine if location is unknown
+        is_unknown = not job_loc or job_loc in ["unknown", "not specified", "not-specified", "n/a", "none"]
+        
+        # Classify remote status
+        remote_keywords = ["remote", "work from home", "wfh", "anywhere"]
+        is_remote = any(re.search(r'\b' + re.escape(kw) + r'\b', job_loc) for kw in remote_keywords) or \
+                    any(re.search(r'\b' + re.escape(kw) + r'\b', job_title) for kw in ["remote", "work from home", "wfh"])
+
+        # Check if the location is purely a work-mode descriptor without a geographical place
+        clean_geo = job_loc
+        for term in ["hybrid", "onsite", "on-site", "office-based", "office based", "office", "remote", "wfh", "work from home", "anywhere", "-", ",", "/"]:
+            clean_geo = clean_geo.replace(term, " ")
+        clean_geo = clean_geo.strip()
+        
+        if not clean_geo and not is_remote:
+            is_unknown = True
+            
+        if not is_unknown:
+            
+            wants_remote = "remote" in pref_locations
+            pref_cities = [pl for pl in pref_locations if pl != "remote"]
+            
+            if is_remote:
+                if not wants_remote:
+                    return True, f"Location mismatch: Remote job but remote not preferred (location: '{job.get('location')}')"
+            else:
+                # Onsite/Hybrid job with known location: check if it matches target cities
+                matched_city = False
+                for city in pref_cities:
+                    # Case-insensitive alias matching helper
+                    pref_aliases = [city]
+                    if city in ["bangalore", "bengaluru"]:
+                        pref_aliases = ["bangalore", "bengaluru"]
+                    
+                    for alias in pref_aliases:
+                        if re.search(r'\b' + re.escape(alias) + r'\b', job_loc):
+                            matched_city = True
+                            break
+                    if matched_city:
+                        break
+                
+                if not matched_city:
+                    return True, f"Location mismatch: Job location '{job.get('location')}' does not match preferred cities: {', '.join(pref_cities)}"
 
     # Rule 4: Salary Hard Filter
     from sources.base import normalize_salary
@@ -241,7 +287,9 @@ def run_job_search_pipeline(
         logger.info(f"Run #{run_id} [{stage}]: {details}")
         update_kwargs = {"status": "running"}
         if extra:
-            update_kwargs.update(extra)
+            valid_db_keys = {"discovered_count", "duplicate_count", "invalid_count", "filtered_count", "analyzed_count", "selected_count", "resume_success_count", "resume_error_count", "status", "error"}
+            db_extras = {k: v for k, v in extra.items() if k in valid_db_keys}
+            update_kwargs.update(db_extras)
         database.update_run_progress(run_id, **update_kwargs, db_path=db_path)
         if progress_callback:
             progress_callback({"run_id": run_id, "stage": stage, "details": details, "extra": extra})
@@ -265,10 +313,20 @@ def run_job_search_pipeline(
         resume_settings = database.get_resume_settings(db_path=db_path)
 
         # Step 2: Job Discovery across sources
-        report_progress("Discovery", "Discovering jobs from Greenhouse, Lever, Ashby...")
+        report_progress("Discovery", "Discovering jobs from registered sources...")
         discovered_jobs = sources.discover_all_sources(preferences)
         discovered_count = len(discovered_jobs)
-        report_progress("Discovery", f"Discovered {discovered_count} job postings.", {"discovered_count": discovered_count})
+
+        source_counts = {}
+        for j in discovered_jobs:
+            s_name = j.get("source", "unknown")
+            source_counts[s_name] = source_counts.get(s_name, 0) + 1
+
+        report_progress(
+            "Discovery",
+            f"Discovered {discovered_count} job postings across sources: {source_counts}",
+            {"discovered_count": discovered_count, "source_counts": source_counts}
+        )
 
         # Step 3: Deduplication & Hard Filtering
         report_progress("Deduplication & Filtering", "Checking job history and deduplicating...")

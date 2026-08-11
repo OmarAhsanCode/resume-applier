@@ -284,7 +284,13 @@ def generate_resume_endpoint(job_id):
     ai_analysis = job.get("ai_analysis") or {}
 
     try:
-        tailored_res = ai.tailor_resume(profile, job, ai_analysis, settings)
+        try:
+            tailored_res = ai.tailor_resume(profile, job, ai_analysis, settings)
+        except Exception as tail_err:
+            logger.warning(f"AI resume tailoring failed: {tail_err}. Falling back to deterministic resume mock.")
+            mock_res = ai._mock_tailor_resume(profile, job, ai_analysis, settings)
+            tailored_res = ai.validate_tailored_resume(mock_res, profile)
+
         latex_code = resume.render_latex(tailored_res)
 
         sanitized_comp = resume.sanitize_filename(job.get("company", "Company"))
@@ -304,17 +310,18 @@ def generate_resume_endpoint(job_id):
         )
 
         base_url = os.getenv("LOCAL_BASE_URL", "http://localhost:5000")
-        overleaf_url = f"{base_url}/jobs/{job['id']}/overleaf"
+        view_url = f"{base_url}/jobs/{job['id']}/view-resume"
 
         try:
-            google_service.update_job_resume_url_in_sheet(job, overleaf_url)
+            google_service.update_job_resume_url_in_sheet(job, view_url)
         except Exception as e:
             logger.warning(f"Failed to update Resume URL in Google Sheets: {e}")
 
         return jsonify({
             "status": "success",
             "message": "Resume created successfully.",
-            "overleaf_url": overleaf_url
+            "view_url": f"/jobs/{job['id']}/view-resume",
+            "download_url": f"/jobs/{job['id']}/download-resume"
         })
     except Exception as e:
         logger.error(f"Error generating resume for job #{job_id}: {e}")
@@ -323,59 +330,56 @@ def generate_resume_endpoint(job_id):
             return jsonify({"status": "error", "message": "Resume generation is temporarily rate-limited. Please try again later."}), 429
         return jsonify({"status": "error", "message": "Resume generation failed. Please try again."}), 500
 
-@app.route("/jobs/<int:job_id>/overleaf")
-def open_in_overleaf(job_id):
-    from flask import render_template_string
+@app.route("/jobs/<int:job_id>/view-resume")
+def view_resume(job_id):
+    from flask import Response
     job = database.get_job_by_id(job_id)
     if not job:
-        flash("Job not found.", "error")
-        return redirect(url_for("results"))
-        
-    tex_code = ""
-    tex_path = job.get("resume_tex_path")
-    if tex_path and os.path.exists(tex_path):
-        try:
-            with open(tex_path, "r", encoding="utf-8") as f:
-                tex_code = f.read()
-        except Exception as e:
-            logger.error(f"Error reading tex file: {e}")
-            
-    if not tex_code and job.get("resume_json"):
-        try:
-            tex_code = resume.render_latex(job["resume_json"])
-        except Exception as e:
-            logger.error(f"Error rendering latex from json: {e}")
+        return "Job not found.", 404
 
-    if not tex_code:
-        # On-demand resume generation retry
-        try:
-            cand_record = database.get_candidate()
-            profile = cand_record.get("profile") if cand_record else {}
-            settings = database.get_resume_settings()
-            ai_analysis = job.get("ai_analysis") or {}
-            tailored_res = ai.tailor_resume(profile, job, ai_analysis, settings)
-            tex_code = resume.render_latex(tailored_res)
-            
-            sanitized_comp = resume.sanitize_filename(job.get("company", "Company"))
-            sanitized_title = resume.sanitize_filename(job.get("title", "Role"))
-            file_basename = f"{sanitized_comp}_{sanitized_title}_{job['id']}"
-            os.makedirs("generated/resumes", exist_ok=True)
-            tex_path = os.path.abspath(f"generated/resumes/{file_basename}.tex")
-            with open(tex_path, "w", encoding="utf-8") as f:
-                f.write(tex_code)
-                
-            database.update_job_resume(job_id=job["id"], resume_json=tailored_res, tex_path=tex_path, status=job.get("status", "selected"))
-        except Exception as e:
-            logger.error(f"On-demand resume generation failed for job #{job_id}: {e}")
-            
-    if not tex_code:
-        flash("Resume source code not available.", "error")
-        return redirect(url_for("results"))
-        
-    import base64
-    encoded_tex = base64.b64encode(tex_code.encode('utf-8')).decode('utf-8')
-    overleaf_url = f"https://www.overleaf.com/docs?snip_uri=data:application/x-tex;base64,{encoded_tex}"
-    return redirect(overleaf_url)
+    tex_path = job.get("resume_tex_path")
+    if not tex_path or not os.path.exists(tex_path):
+        return "Resume source file not found.", 404
+
+    # Path traversal protection
+    resumes_dir = os.path.abspath("generated/resumes")
+    resolved_path = os.path.abspath(tex_path)
+    if not resolved_path.startswith(resumes_dir):
+        return "Access denied: Invalid path.", 403
+
+    try:
+        with open(resolved_path, "r", encoding="utf-8") as f:
+            tex_code = f.read()
+        return Response(tex_code, mimetype="text/plain; charset=utf-8")
+    except Exception as e:
+        logger.error(f"Error reading tex file: {e}")
+        return "Error reading resume file.", 500
+
+@app.route("/jobs/<int:job_id>/download-resume")
+def download_resume(job_id):
+    from flask import send_file
+    job = database.get_job_by_id(job_id)
+    if not job:
+        return "Job not found.", 404
+
+    tex_path = job.get("resume_tex_path")
+    if not tex_path or not os.path.exists(tex_path):
+        return "Resume source file not found.", 404
+
+    # Path traversal protection
+    resumes_dir = os.path.abspath("generated/resumes")
+    resolved_path = os.path.abspath(tex_path)
+    if not resolved_path.startswith(resumes_dir):
+        return "Access denied: Invalid path.", 403
+
+    try:
+        sanitized_comp = resume.sanitize_filename(job.get("company", "Company"))
+        sanitized_title = resume.sanitize_filename(job.get("title", "Role"))
+        download_name = f"{sanitized_comp}_{sanitized_title}_Resume.tex"
+        return send_file(resolved_path, as_attachment=True, download_name=download_name, mimetype="application/x-tex")
+    except Exception as e:
+        logger.error(f"Error downloading tex file: {e}")
+        return "Error downloading resume file.", 500
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))

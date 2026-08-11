@@ -1,38 +1,36 @@
 import logging
 from typing import List, Dict, Any
-from sources import greenhouse, lever, ashby
+from sources import greenhouse, lever, ashby, workday, smartrecruiters, taleo, icims, adzuna
 
 logger = logging.getLogger(__name__)
 
+# Lightweight Source Registry
+SOURCES = [
+    {"name": "greenhouse", "module": greenhouse},
+    {"name": "lever", "module": lever},
+    {"name": "ashby", "module": ashby},
+    {"name": "workday", "module": workday},
+    {"name": "smartrecruiters", "module": smartrecruiters},
+    {"name": "taleo", "module": taleo},
+    {"name": "icims", "module": icims},
+    {"name": "adzuna", "module": adzuna}
+]
+
 def discover_all_sources(search_config: Dict[str, Any] = None) -> List[Dict[str, Any]]:
     """
-    Discovers jobs from all supported job sources (Greenhouse, Lever, Ashby)
-    and returns a combined list of normalized job dictionaries.
+    Discovers jobs from all registered job sources using the unified Source Registry.
+    Error isolation ensured per source.
     """
     all_jobs = []
     
-    # 1. Greenhouse
-    try:
-        gh_jobs = greenhouse.discover_jobs(search_config)
-        all_jobs.extend(gh_jobs)
-        logger.info(f"Discovered {len(gh_jobs)} jobs from Greenhouse.")
-    except Exception as e:
-        logger.error(f"Error in Greenhouse job discovery: {e}")
-        
-    # 2. Lever
-    try:
-        lv_jobs = lever.discover_jobs(search_config)
-        all_jobs.extend(lv_jobs)
-        logger.info(f"Discovered {len(lv_jobs)} jobs from Lever.")
-    except Exception as e:
-        logger.error(f"Error in Lever job discovery: {e}")
-
-    # 3. Ashby
-    try:
-        ash_jobs = ashby.discover_jobs(search_config)
-        all_jobs.extend(ash_jobs)
-        logger.info(f"Discovered {len(ash_jobs)} jobs from Ashby.")
-    except Exception as e:
-        logger.error(f"Error in Ashby job discovery: {e}")
+    for source_entry in SOURCES:
+        s_name = source_entry["name"]
+        s_mod = source_entry["module"]
+        try:
+            jobs = s_mod.discover_jobs(search_config)
+            all_jobs.extend(jobs)
+            logger.info(f"Discovered {len(jobs)} jobs from {s_name.capitalize()}.")
+        except Exception as e:
+            logger.error(f"Error in {s_name.capitalize()} job discovery: {e}")
 
     return all_jobs

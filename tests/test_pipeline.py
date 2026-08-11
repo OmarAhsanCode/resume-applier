@@ -97,13 +97,5 @@ class TestPipeline(unittest.TestCase):
         normalized = sources.base.normalize_url(url)
         self.assertEqual(normalized, "https://jobs.lever.co/company/abc12345")
 
-    def test_overleaf_base64_generation(self):
-        import base64
-        tex_code = "Hello LaTeX"
-        encoded = base64.b64encode(tex_code.encode('utf-8')).decode('utf-8')
-        expected_url = f"https://www.overleaf.com/docs?snip_uri=data:application/x-tex;base64,{encoded}"
-        self.assertIn("data:application/x-tex;base64,", expected_url)
-        self.assertTrue(expected_url.endswith(encoded))
-
 if __name__ == "__main__":
     unittest.main()

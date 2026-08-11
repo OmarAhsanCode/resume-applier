@@ -61,6 +61,12 @@ def initialize_google_sheets():
         logger.warning(f"Failed to build Google Sheets service: {e}")
         return False
 
+def ensure_sheets_service():
+    global _sheets_service
+    if not _sheets_service:
+        initialize_google_sheets()
+    return _sheets_service is not None
+
 SHEET_HEADERS = [
     "Job ID", "Rank", "Company", "Position", "Location", "Employment Type",
     "Deterministic Score", "AI Score", "Final Score", "Matching Skills",
@@ -107,8 +113,7 @@ def sync_jobs_to_sheet(selected_jobs: List[Dict[str, Any]]) -> bool:
     Syncs selected jobs to Google Spreadsheet by appending new jobs and updating existing rows.
     Preserves historical rows across runs.
     """
-    global _sheets_service
-    if not _sheets_service or not GOOGLE_SHEETS_SPREADSHEET_ID:
+    if not ensure_sheets_service() or not GOOGLE_SHEETS_SPREADSHEET_ID:
         logger.info("Google Sheets API service or SPREADSHEET_ID unconfigured. Skipping sheet sync.")
         return False
 
@@ -185,8 +190,7 @@ def sync_jobs_to_sheet(selected_jobs: List[Dict[str, Any]]) -> bool:
 
 def _find_job_row_number(job: Dict[str, Any]) -> Optional[int]:
     """Finds the 1-indexed row number of a job in Google Sheets."""
-    global _sheets_service
-    if not _sheets_service or not GOOGLE_SHEETS_SPREADSHEET_ID:
+    if not ensure_sheets_service() or not GOOGLE_SHEETS_SPREADSHEET_ID:
         return None
 
     try:
@@ -214,7 +218,7 @@ def _find_job_row_number(job: Dict[str, Any]) -> Optional[int]:
 def update_job_status_in_sheet(job: Dict[str, Any]) -> bool:
     """Updates application status column (Col O / Col 15) of a single job in Google Sheets without altering Resume URL."""
     row_num = _find_job_row_number(job)
-    if not row_num or not _sheets_service:
+    if not row_num or not ensure_sheets_service():
         return sync_jobs_to_sheet([job])
 
     try:
@@ -246,7 +250,7 @@ def update_job_status_in_sheet(job: Dict[str, Any]) -> bool:
 def update_job_resume_url_in_sheet(job: Dict[str, Any], overleaf_url: str) -> bool:
     """Updates Resume URL column (Col N / Col 14) of a single job in Google Sheets without altering application status."""
     row_num = _find_job_row_number(job)
-    if not row_num or not _sheets_service:
+    if not row_num or not ensure_sheets_service():
         return sync_jobs_to_sheet([job])
 
     try:
