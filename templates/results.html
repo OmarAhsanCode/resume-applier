@@ -1,94 +1,111 @@
 {% extends "base.html" %}
 
-{% block title %}Selected Jobs & Resumes - Personal Job Automator{% endblock %}
+{% block title %}Results - Job Automator ERP{% endblock %}
 
 {% block content %}
-<div class="page-header flex-between">
+<div class="erp-page-header flex-between align-center">
     <div>
-        <h1>Selected Job Opportunities</h1>
-        <p>Ranked recommendations with tailored resumes and application links.</p>
+        <h2>Selected Job Opportunities</h2>
+        <p class="subtitle">Ranked job candidates with tailored resumes and application links.</p>
     </div>
-    <div class="filter-controls">
-        <a href="{{ url_for('results') }}" class="btn btn-sm {% if not current_filter %}btn-primary{% else %}btn-outline{% endif %}">All Jobs</a>
-        <a href="{{ url_for('results', status='selected') }}" class="btn btn-sm {% if current_filter == 'selected' %}btn-primary{% else %}btn-outline{% endif %}">Selected</a>
-        <a href="{{ url_for('results', status='applied') }}" class="btn btn-sm {% if current_filter == 'applied' %}btn-primary{% else %}btn-outline{% endif %}">Applied</a>
-        <a href="{{ url_for('results', status='saved') }}" class="btn btn-sm {% if current_filter == 'saved' %}btn-primary{% else %}btn-outline{% endif %}">Saved</a>
+    <div class="header-actions flex-gap">
+        {% if google_sheets_url %}
+            <a href="{{ google_sheets_url }}" target="_blank" class="btn btn-primary btn-sm">OPEN GOOGLE SHEET ↗</a>
+        {% else %}
+            <button onclick="showToast('Google Sheet is not configured in .env', 'info')" class="btn btn-secondary btn-sm">OPEN GOOGLE SHEET ↗</button>
+        {% endif %}
     </div>
+</div>
+
+<div class="filter-bar">
+    <span class="filter-label">Filter:</span>
+    <a href="{{ url_for('results') }}" class="btn-filter {% if not current_filter %}active{% endif %}">All Jobs</a>
+    <a href="{{ url_for('results', status='selected') }}" class="btn-filter {% if current_filter == 'selected' %}active{% endif %}">Selected</a>
+    <a href="{{ url_for('results', status='applied') }}" class="btn-filter {% if current_filter == 'applied' %}active{% endif %}">Applied</a>
+    <a href="{{ url_for('results', status='saved') }}" class="btn-filter {% if current_filter == 'saved' %}active{% endif %}">Saved</a>
 </div>
 
 {% if jobs %}
-<div class="alert alert-info discovery-summary-banner" style="margin-bottom: 20px; padding: 12px 16px; background: #eef6ff; border-left: 4px solid #0066cc; border-radius: 4px;">
-    <strong>Discovery Summary:</strong> Displaying {{ jobs|length }} job opportunities found across active ATS adapters and company portals.
+<div class="discovery-summary-strip">
+    <strong>Discovery Summary:</strong> Displaying {{ jobs|length }} selected job opportunities processed through deterministic ranking and AI evaluation.
 </div>
 
-<div class="card table-card">
-    <table class="data-table">
+<div class="card table-container-card">
+    <table class="erp-data-table">
         <thead>
             <tr>
-                <th>Rank</th>
-                <th>Company</th>
-                <th>Position</th>
-                <th>Location</th>
-                <th>Type</th>
-                <th>Salary / Stipend</th>
-                <th>Key Points</th>
-                <th>Score</th>
-                <th>Resume</th>
-                <th>Apply</th>
-                <th>Actions</th>
+                <th style="width: 50px;">Rank</th>
+                <th style="width: 130px;">Company</th>
+                <th style="width: 190px;">Position</th>
+                <th style="width: 130px;">Location</th>
+                <th style="width: 80px;">Type</th>
+                <th style="width: 110px;">Salary</th>
+                <th style="width: 280px;">Key Points</th>
+                <th style="width: 90px;">Score</th>
+                <th style="width: 120px;">Resume</th>
+                <th style="width: 80px;">Apply</th>
+                <th style="width: 130px;">Actions</th>
             </tr>
         </thead>
         <tbody>
             {% for job in jobs %}
             <tr id="job-row-{{ job.id }}" class="job-row status-{{ job.status }}">
-                <td class="cell-rank">#{{ loop.index }}</td>
-                <td class="cell-company"><strong>{{ job.company }}</strong></td>
-                <td class="cell-title">
-                    <span class="job-title-text">{{ job.title }}</span>
+                <td class="cell-center">#{{ loop.index }}</td>
+                <td><strong>{{ job.company }}</strong></td>
+                <td>
+                    <div class="job-title-text">{{ job.title }}</div>
                     <span class="job-source-tag">{{ job.source }}</span>
                 </td>
-                <td class="cell-location">{{ job.location or 'Remote' }}</td>
-                <td class="cell-type"><span class="badge badge-info">{{ job.employment_type or 'Unknown' }}</span></td>
-                <td class="cell-salary">
+                <td>{{ job.location or 'Remote' }}</td>
+                <td><span class="badge badge-info">{{ job.employment_type or 'Unknown' }}</span></td>
+                <td>
                     {% set sal = job.normalized_salary or (job.ai_analysis.extracted_salary if job.ai_analysis else None) %}
                     <span class="salary-text">{{ sal if sal and sal != 'None' else 'Not disclosed' }}</span>
                 </td>
                 <td class="cell-keypoints">
                     {% if job.ai_analysis and job.ai_analysis.key_points %}
                         <ul class="key-points-list">
-                            {% for point in job.ai_analysis.key_points %}
+                            {% for point in job.ai_analysis.key_points[:3] %}
                                 <li>• {{ point }}</li>
                             {% endfor %}
                         </ul>
+                        {% if job.ai_analysis.reason or job.ai_analysis.key_points|length > 3 %}
+                            <button onclick="openDetailsModal('{{ job.id }}', '{{ job.company|escape }}', '{{ job.title|escape }}')" class="btn-link-sm">[ View ]</button>
+                        {% endif %}
                     {% elif job.ai_analysis and job.ai_analysis.reason %}
-                        <p class="reason-text">{{ job.ai_analysis.reason }}</p>
+                        <p class="reason-text">{{ job.ai_analysis.reason[:100] }}...</p>
+                        <button onclick="openDetailsModal('{{ job.id }}', '{{ job.company|escape }}', '{{ job.title|escape }}')" class="btn-link-sm">[ View ]</button>
                     {% else %}
-                        <p class="reason-text muted">Deterministic score match.</p>
+                        <span class="muted">Deterministic score match.</span>
                     {% endif %}
+                    <!-- Hidden script data for details modal -->
+                    <script id="job-detail-data-{{ job.id }}" type="application/json">
+                        {{ (job.ai_analysis or {})|tojson }}
+                    </script>
                 </td>
-                <td class="cell-scores">
-                    <div class="score-badge final-score">Final: {{ job.final_score or job.deterministic_score or 'N/A' }}</div>
+                <td class="cell-center">
+                    <div class="score-badge">Final: {{ job.final_score or job.deterministic_score or 'N/A' }}</div>
                     <div class="score-sub">Det: {{ job.deterministic_score or '-' }} | AI: {{ job.ai_score or '-' }}</div>
                 </td>
-                <td class="cell-resume" id="resume-cell-{{ job.id }}">
+                <td id="resume-cell-{{ job.id }}" class="cell-center">
                     {% if job.resume_tex_path or job.resume_json %}
-                        <span class="resume-created-badge" style="font-weight: bold; color: var(--success-color, #2ecc71); display: block; margin-bottom: 4px;">✓ Created</span>
-                        <div class="resume-actions-container" style="display: flex; flex-direction: column; gap: 4px;">
-                            <a href="{{ url_for('view_resume', job_id=job.id) }}" target="_blank" class="btn btn-sm btn-outline btn-open-tex" style="padding: 2px 8px; font-size: 0.8rem; text-align: center; border-radius: 4px;">Open .tex</a>
-                            <a href="{{ url_for('download_resume', job_id=job.id) }}" class="btn btn-sm btn-outline btn-download-tex" style="padding: 2px 8px; font-size: 0.8rem; text-align: center; border-radius: 4px;">Download .tex</a>
+                        <span class="badge badge-success">✓ Created</span>
+                        <div class="resume-btn-group">
+                            <a href="{{ url_for('view_resume', job_id=job.id) }}" target="_blank" class="btn btn-xs btn-outline">Overleaf / .tex</a>
+                            <a href="{{ url_for('download_resume', job_id=job.id) }}" class="btn btn-xs btn-secondary">Download</a>
                         </div>
                     {% else %}
-                        <button id="resume-btn-{{ job.id }}" onclick="generateResume('{{ job.id }}', this)" class="btn btn-sm btn-primary btn-generate-resume">Generate Resume</button>
+                        <button id="resume-btn-{{ job.id }}" onclick="generateResume('{{ job.id }}', this)" class="btn btn-xs btn-primary">Generate</button>
                     {% endif %}
                 </td>
-                <td class="cell-apply">
-                    <a href="{{ job.application_url }}" target="_blank" class="btn btn-sm btn-apply">Apply 🔗</a>
+                <td class="cell-center">
+                    <a href="{{ job.application_url }}" target="_blank" class="btn btn-xs btn-action">Apply 🔗</a>
                 </td>
-                <td class="cell-actions">
+                <td class="cell-center">
                     <div class="action-buttons">
-                        <button onclick="updateJobStatus('{{ job.id }}', 'applied')" class="btn-icon btn-mark-applied {% if job.status == 'applied' %}active{% endif %}" title="Mark Applied">✓ Applied</button>
-                        <button onclick="updateJobStatus('{{ job.id }}', 'saved')" class="btn-icon btn-mark-saved {% if job.status == 'saved' %}active{% endif %}" title="Save for later">★ Save</button>
-                        <button onclick="updateJobStatus('{{ job.id }}', 'rejected')" class="btn-icon btn-mark-rejected {% if job.status == 'rejected' %}active{% endif %}" title="Reject">✕ Reject</button>
+                        <button onclick="updateJobStatus('{{ job.id }}', 'applied')" class="btn-icon btn-mark-applied {% if job.status == 'applied' %}active{% endif %}" title="Mark Applied">Applied</button>
+                        <button onclick="updateJobStatus('{{ job.id }}', 'saved')" class="btn-icon btn-mark-saved {% if job.status == 'saved' %}active{% endif %}" title="Save">Save</button>
+                        <button onclick="updateJobStatus('{{ job.id }}', 'rejected')" class="btn-icon btn-mark-rejected {% if job.status == 'rejected' %}active{% endif %}" title="Reject">Reject</button>
                     </div>
                 </td>
             </tr>
@@ -98,8 +115,25 @@
 </div>
 {% else %}
 <div class="card empty-card">
-    <h3>No Jobs Found</h3>
-    <p>No jobs matching the selected filter exist in history. Launch a job search from the <a href="{{ url_for('index') }}">Dashboard</a>.</p>
+    <h4>No Jobs Found</h4>
+    <p>No jobs matching filter exist. Execute job search from <a href="{{ url_for('index') }}">Dashboard</a>.</p>
 </div>
 {% endif %}
+
+<!-- Details / Key Points Modal -->
+<div id="modal-job-details" class="modal-overlay hidden">
+    <div class="modal-box modal-box-large">
+        <div class="modal-header">
+            <h4 id="details-modal-title">Job Details</h4>
+            <button onclick="closeDetailsModal()" class="btn-close">×</button>
+        </div>
+        <div class="modal-body" id="details-modal-body">
+            <!-- Populated via JS -->
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeDetailsModal()" class="btn btn-secondary">CLOSE</button>
+        </div>
+    </div>
+</div>
+
 {% endblock %}

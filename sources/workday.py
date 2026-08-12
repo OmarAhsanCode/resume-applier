@@ -43,7 +43,15 @@ def discover_jobs(search_config: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         if not host or not tenant:
             continue
 
-        api_url = f"https://{host}/wday/cxs/{tenant}/jobs"
+        company_slug = target.get("company_slug") or company.lower().replace(" ", "")
+        
+        path = target.get("path")
+        if path:
+            api_url = f"https://{host}{path}"
+        elif target.get("tenant_path"):
+            api_url = f"https://{host}/wday/cxs/{target['tenant_path']}/jobs"
+        else:
+            api_url = f"https://{host}/wday/cxs/{company_slug}/{tenant}/jobs"
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",

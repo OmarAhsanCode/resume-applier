@@ -1,113 +1,137 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Personal Job Automator{% endblock %}
+{% block title %}Dashboard - Job Automator ERP{% endblock %}
 
 {% block content %}
-<div class="dashboard-header">
-    <h1>Personal Job Automator</h1>
-    <p class="subtitle">Automated job discovery, deterministic ranking, semantic AI matching & LaTeX resume tailoring.</p>
+<div class="erp-page-header">
+    <h2>System Operations Dashboard</h2>
+    <p class="subtitle">Multi-source Discovery • Deterministic Ranking • Multi-Provider AI • LaTeX Tailoring</p>
 </div>
 
 <div class="grid-layout">
-    <!-- Setup Status Card -->
+    <!-- System Readiness Card -->
     <div class="card status-card">
-        <h2>System Readiness</h2>
+        <h3>System Readiness</h3>
         <div class="status-list">
             <div class="status-item">
                 <span class="status-label">Master Candidate Profile</span>
                 {% if candidate %}
-                    <span class="badge badge-success">✓ Loaded ({{ candidate.name }})</span>
+                    <span class="badge badge-success">Loaded ({{ candidate.name }})</span>
                 {% else %}
-                    <span class="badge badge-warning">⚠ Not Setup</span>
+                    <span class="badge badge-warning">Not Setup</span>
                 {% endif %}
             </div>
 
             <div class="status-item">
                 <span class="status-label">Master CV Document</span>
                 {% if candidate and candidate.master_resume_path %}
-                    <span class="badge badge-success">✓ Uploaded</span>
+                    <span class="badge badge-success">Uploaded</span>
                 {% else %}
-                    <span class="badge badge-warning">⚠ Missing</span>
+                    <span class="badge badge-warning">Missing</span>
                 {% endif %}
             </div>
 
             <div class="status-item">
                 <span class="status-label">Job Search Preferences</span>
                 {% if preferences %}
-                    <span class="badge badge-success">✓ Configured ({{ preferences.preferred_roles|length }} Roles)</span>
+                    <span class="badge badge-success">Configured ({{ preferences.preferred_roles|length }} Roles)</span>
                 {% else %}
-                    <span class="badge badge-warning">⚠ Default Settings</span>
+                    <span class="badge badge-warning">Default Settings</span>
                 {% endif %}
             </div>
         </div>
 
         {% if not candidate %}
             <div class="action-banner">
-                <p>Welcome! Start by uploading your Master CV PDF.</p>
-                <a href="{{ url_for('setup') }}" class="btn btn-primary">Start One-Time Setup</a>
+                <p>Upload Master CV PDF to complete setup.</p>
+                <a href="{{ url_for('setup') }}" class="btn btn-primary btn-sm">Upload Master CV</a>
             </div>
         {% endif %}
     </div>
 
-    <!-- Job Search Launcher Form -->
+    <!-- ERP Run & Database Controls Card -->
     <div class="card launcher-card">
-        <h2>Find Jobs</h2>
-        <p>Trigger a search across Greenhouse, Lever, and Ashby. Deduplicates and generates tailored LaTeX resumes automatically.</p>
-        
+        <h3>Run Controls</h3>
         <form id="find-jobs-form" action="{{ url_for('trigger_run') }}" method="POST">
-            <div class="form-group">
-                <label for="jobs_count">Number of target jobs to find:</label>
-                <input type="number" id="jobs_count" name="jobs_count" value="{{ preferences.jobs_per_run if preferences else 50 }}" min="1" max="200" class="form-input">
+            <div class="form-group inline-group">
+                <label for="jobs_count">Target Jobs Count:</label>
+                <input type="number" id="jobs_count" name="jobs_count" value="{{ preferences.jobs_per_run if preferences else 50 }}" min="1" max="200" class="form-input form-input-short">
             </div>
 
-            <button type="submit" id="btn-find-jobs" class="btn btn-action btn-large" {% if not candidate %}disabled{% endif %}>
-                🚀 FIND JOBS
-            </button>
+            <div class="control-button-group">
+                <button type="submit" id="btn-find-jobs" class="btn btn-primary" {% if not candidate %}disabled{% endif %}>
+                    FIND JOBS
+                </button>
+
+                <button type="button" id="btn-stop-run" onclick="stopRun()" class="btn btn-danger" disabled>
+                    STOP CURRENT RUN
+                </button>
+
+                <button type="button" id="btn-clear-db" onclick="openClearDbModal()" class="btn btn-secondary">
+                    CLEAR DATABASE
+                </button>
+            </div>
         </form>
     </div>
 </div>
 
-<!-- Progress Polling Box -->
-<div id="progress-container" class="card progress-card {% if current_progress.status == 'running' %}active{% else %}hidden{% endif %}">
-    <div class="progress-header">
-        <div class="spinner"></div>
-        <h3 id="progress-stage">{{ current_progress.stage }}</h3>
+<!-- Run Status Panel -->
+<div id="run-status-panel" class="card status-panel-card">
+    <h3>Run Status Panel</h3>
+    <div class="status-grid">
+        <div class="status-metric">
+            <span class="metric-label">Status</span>
+            <span id="panel-status-val" class="badge badge-info">{{ current_progress.status|upper }}</span>
+        </div>
+        <div class="status-metric">
+            <span class="metric-label">Run ID</span>
+            <span id="panel-run-id-val">{{ latest_run.id if latest_run else '-' }}</span>
+        </div>
+        <div class="status-metric">
+            <span class="metric-label">Stage</span>
+            <span id="panel-stage-val">{{ current_progress.stage }}</span>
+        </div>
+        <div class="status-metric">
+            <span class="metric-label">Discovered</span>
+            <span id="panel-discovered-val">{{ latest_run.discovered_count if latest_run else '0' }}</span>
+        </div>
+        <div class="status-metric">
+            <span class="metric-label">AI Evaluated</span>
+            <span id="panel-analyzed-val">{{ latest_run.analyzed_count if latest_run else '0' }}</span>
+        </div>
+        <div class="status-metric">
+            <span class="metric-label">Selected</span>
+            <span id="panel-selected-val">{{ latest_run.selected_count if latest_run else '0' }}</span>
+        </div>
     </div>
-    <p id="progress-details">{{ current_progress.details }}</p>
-    <div class="progress-bar-bg">
-        <div id="progress-bar-fill" class="progress-bar-fill" style="width: 50%;"></div>
+    <div id="panel-details" class="panel-details-text">{{ current_progress.details }}</div>
+</div>
+
+<!-- Live Pipeline Console -->
+<div class="card console-card">
+    <div class="console-header">
+        <h3>PIPELINE LOG CONSOLE</h3>
+        <span class="console-status-indicator" id="console-live-indicator">● IDLE</span>
+    </div>
+    <div id="live-console" class="live-console-box">
+        <div class="console-line">[00:00:00] Console initialized. Ready to execute job discovery pipeline.</div>
     </div>
 </div>
 
-<!-- Last Run Summary Card -->
-<div class="card history-card">
-    <h2>Last Run Summary</h2>
-    {% if latest_run %}
-        <div class="stats-grid">
-            <div class="stat-box">
-                <span class="stat-number">{{ latest_run.discovered_count }}</span>
-                <span class="stat-label">Discovered</span>
-            </div>
-            <div class="stat-box">
-                <span class="stat-number">{{ latest_run.duplicate_count }}</span>
-                <span class="stat-label">Duplicates Skipped</span>
-            </div>
-            <div class="stat-box">
-                <span class="stat-number">{{ latest_run.selected_count }}</span>
-                <span class="stat-label">Top Selected</span>
-            </div>
-            <div class="stat-box">
-                <span class="stat-number">{{ latest_run.resume_success_count }}</span>
-                <span class="stat-label">Resumes Created</span>
-            </div>
+<!-- Clear Database Modal -->
+<div id="modal-clear-db" class="modal-overlay hidden">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h4>Clear all jobs and run history?</h4>
         </div>
-        <div class="run-meta">
-            <span>Started: {{ latest_run.started_at[:19].replace('T', ' ') }}</span>
-            <span>Status: <strong class="badge badge-info">{{ latest_run.status }}</strong></span>
-            <a href="{{ url_for('results') }}" class="btn btn-secondary btn-sm">View Results →</a>
+        <div class="modal-body">
+            <p>All discovered jobs and run history stored in SQLite will be permanently deleted.</p>
         </div>
-    {% else %}
-        <p class="empty-state">No job runs executed yet. Click <strong>FIND JOBS</strong> above to begin your first automated run.</p>
-    {% endif %}
+        <div class="modal-footer">
+            <button onclick="closeClearDbModal()" class="btn btn-secondary">CANCEL</button>
+            <button onclick="confirmClearDatabase()" class="btn btn-danger">CLEAR DATABASE</button>
+        </div>
+    </div>
 </div>
+
 {% endblock %}

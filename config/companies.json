@@ -1,81 +1,157 @@
 [
   {
-    "company": "Microsoft India",
-    "careers_url": "https://careers.microsoft.com",
-    "source": "icims",
-    "source_identifier": "microsoft",
-    "country": "India",
-    "enabled": true
-  },
-  {
-    "company": "Google India",
-    "careers_url": "https://www.google.com/about/careers/applications/jobs/results/",
-    "source": "greenhouse",
-    "source_identifier": "google",
-    "country": "India",
-    "enabled": true
-  },
-  {
-    "company": "Amazon India",
-    "careers_url": "https://www.amazon.jobs",
-    "source": "workday",
-    "source_identifier": "amazon",
-    "country": "India",
-    "enabled": true
-  },
-  {
-    "company": "Flipkart",
-    "careers_url": "https://www.flipkartcareers.com",
-    "source": "greenhouse",
-    "source_identifier": "flipkart",
-    "country": "India",
-    "enabled": true
-  },
-  {
-    "company": "Swiggy",
-    "careers_url": "https://careers.swiggy.com",
-    "source": "lever",
-    "source_identifier": "swiggy",
-    "country": "India",
-    "enabled": true
-  },
-  {
-    "company": "Zomato",
-    "careers_url": "https://www.zomato.com/careers",
-    "source": "lever",
-    "source_identifier": "zomato",
-    "country": "India",
-    "enabled": true
-  },
-  {
     "company": "Razorpay",
     "careers_url": "https://razorpay.com/jobs",
+    "category": "Indian Fintech",
+    "priority": 95,
+    "country": "India",
     "source": "greenhouse",
     "source_identifier": "razorpay",
-    "country": "India",
-    "enabled": true
-  },
-  {
-    "company": "PhonePe",
-    "careers_url": "https://www.phonepe.com/careers",
-    "source": "ashby",
-    "source_identifier": "phonepe",
-    "country": "India",
     "enabled": true
   },
   {
     "company": "Postman",
     "careers_url": "https://www.postman.com/company/careers",
+    "category": "Indian SaaS",
+    "priority": 95,
+    "country": "India",
     "source": "lever",
     "source_identifier": "postman",
+    "enabled": true
+  },
+  {
+    "company": "BrowserStack",
+    "careers_url": "https://www.browserstack.com/careers",
+    "category": "Indian SaaS",
+    "priority": 90,
     "country": "India",
+    "source": "greenhouse",
+    "source_identifier": "browserstack",
+    "enabled": true
+  },
+  {
+    "company": "Freshworks",
+    "careers_url": "https://www.freshworks.com/company/careers",
+    "category": "Indian SaaS",
+    "priority": 90,
+    "country": "India",
+    "source": "greenhouse",
+    "source_identifier": "freshworks",
+    "enabled": true
+  },
+  {
+    "company": "Chargebee",
+    "careers_url": "https://www.chargebee.com/careers",
+    "category": "Indian SaaS",
+    "priority": 85,
+    "country": "India",
+    "source": "greenhouse",
+    "source_identifier": "chargebee",
+    "enabled": true
+  },
+  {
+    "company": "Swiggy",
+    "careers_url": "https://careers.swiggy.com",
+    "category": "Indian Consumer/Internet",
+    "priority": 90,
+    "country": "India",
+    "source": "lever",
+    "source_identifier": "swiggy",
+    "enabled": true
+  },
+  {
+    "company": "Zomato",
+    "careers_url": "https://www.zomato.com/careers",
+    "category": "Indian Consumer/Internet",
+    "priority": 90,
+    "country": "India",
+    "source": "lever",
+    "source_identifier": "zomato",
+    "enabled": true
+  },
+  {
+    "company": "PhonePe",
+    "careers_url": "https://www.phonepe.com/careers",
+    "category": "Indian Fintech",
+    "priority": 95,
+    "country": "India",
+    "source": "ashby",
+    "source_identifier": "phonepe",
+    "enabled": true
+  },
+  {
+    "company": "CRED",
+    "careers_url": "https://cred.club/careers",
+    "category": "Indian Fintech",
+    "priority": 90,
+    "country": "India",
+    "source": "greenhouse",
+    "source_identifier": "cred",
+    "enabled": true
+  },
+  {
+    "company": "Atlassian India",
+    "careers_url": "https://www.atlassian.com/company/careers",
+    "category": "Global Tech (India Presence)",
+    "priority": 100,
+    "country": "India",
+    "source": "greenhouse",
+    "source_identifier": "atlassian",
     "enabled": true
   },
   {
     "company": "Uber India",
     "careers_url": "https://www.uber.com/us/en/careers",
+    "category": "Global Tech (India Presence)",
+    "priority": 95,
+    "country": "India",
     "source": "greenhouse",
     "source_identifier": "uber",
+    "enabled": true
+  },
+  {
+    "company": "Adobe India",
+    "careers_url": "https://www.adobe.com/careers.html",
+    "category": "Global Tech (India Presence)",
+    "priority": 95,
+    "country": "India",
+    "source": "workday",
+    "source_identifier": "adobe",
+    "enabled": true
+  },
+  {
+    "company": "NVIDIA India",
+    "careers_url": "https://www.nvidia.com/en-us/about-nvidia/careers/",
+    "category": "Global Tech (India Presence)",
+    "priority": 100,
+    "country": "India",
+    "source": "workday",
+    "source_identifier": "nvidia",
+    "enabled": true
+  },
+  {
+    "company": "Salesforce India",
+    "careers_url": "https://www.salesforce.com/company/careers/",
+    "category": "Global Enterprise Tech (India Presence)",
+    "priority": 90,
+    "country": "India",
+    "source": "workday",
+    "source_identifier": "salesforce",
+    "enabled": true
+  },
+  {
+    "company": "Google India",
+    "careers_url": "https://www.google.com/about/careers/applications/jobs/results/",
+    "category": "Global Tech (India Presence)",
+    "priority": 100,
+    "country": "India",
+    "enabled": true
+  },
+  {
+    "company": "Microsoft India",
+    "careers_url": "https://careers.microsoft.com",
+    "category": "Global Tech (India Presence)",
+    "priority": 100,
     "country": "India",
     "enabled": true
   }

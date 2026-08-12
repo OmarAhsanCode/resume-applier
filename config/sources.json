@@ -1,69 +1,79 @@
 {
   "greenhouse": [
+    "razorpay",
+    "browserstack",
+    "freshworks",
+    "chargebee",
+    "cred",
+    "atlassian",
+    "uber",
+    "flipkart",
+    "groww",
+    "meesho",
+    "clevertap",
     "stripe",
     "figma",
-    "github",
-    "discord",
-    "gitlab",
-    "datadog",
-    "canonical",
-    "doordash"
+    "datadog"
   ],
   "lever": [
-    "palantir",
-    "netflix",
-    "spotify",
     "postman",
-    "scaleai",
-    "chime"
+    "swiggy",
+    "zomato",
+    "palantir",
+    "spotify"
   ],
   "ashby": [
+    "phonepe",
     "ramp",
     "linear",
     "retool",
     "notion",
-    "airtable",
-    "openaipublic"
+    "airtable"
   ],
   "workday": [
     {
-      "company": "Adobe",
+      "company": "Adobe University",
       "host": "adobe.wd5.myworkdayjobs.com",
-      "tenant": "external_careers"
+      "tenant": "external_university",
+      "company_slug": "adobe"
+    },
+    {
+      "company": "Adobe Experienced",
+      "host": "adobe.wd5.myworkdayjobs.com",
+      "tenant": "external_experienced",
+      "company_slug": "adobe"
     },
     {
       "company": "Salesforce",
       "host": "salesforce.wd12.myworkdayjobs.com",
-      "tenant": "External_Career_Site"
+      "tenant": "External_Career_Site",
+      "company_slug": "salesforce"
     },
     {
       "company": "NVIDIA",
       "host": "nvidia.wd5.myworkdayjobs.com",
-      "tenant": "NVIDIAExternalCareerSite"
+      "tenant": "NVIDIAExternalCareerSite",
+      "company_slug": "nvidia"
     }
   ],
   "smartrecruiters": [
-    "Square",
     "Visa",
     "Bosch",
+    "Square",
     "Ubisoft"
   ],
-  "taleo": [
-    {
-      "company": "Oracle",
-      "career_url": "https://oracle.taleo.net/careersection/2/jobsearch.ftl"
-    }
-  ],
-  "icims": [
-    {
-      "company": "Microsoft",
-      "portal_url": "https://careers.microsoft.com"
-    }
-  ],
+  "taleo": {
+    "enabled": false,
+    "targets": []
+  },
+  "icims": {
+    "enabled": false,
+    "targets": []
+  },
   "adzuna": {
     "app_id": "",
     "app_key": "",
     "country": "in",
-    "enabled": false
+    "enabled": true
   }
 }

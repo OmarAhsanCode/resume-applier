@@ -55,7 +55,7 @@ def initialize_google_sheets():
         
     try:
         from googleapiclient.discovery import build
-        _sheets_service = build('sheets', 'v4', credentials=creds)
+        _sheets_service = build('sheets', 'v4', credentials=creds, cache_discovery=False)
         return True
     except Exception as e:
         logger.warning(f"Failed to build Google Sheets service: {e}")

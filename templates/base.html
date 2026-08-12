@@ -3,26 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Personal Job Automator{% endblock %}</title>
+    <title>{% block title %}Job Automator ERP{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
     <header class="navbar">
         <div class="nav-container">
-            <a href="{{ url_for('index') }}" class="nav-brand">
-                <span class="brand-icon">⚡</span>
-                <span class="brand-name">Job Automator</span>
-            </a>
+            <a href="{{ url_for('index') }}" class="nav-brand">Job Automator</a>
             <nav class="nav-links">
-                <a href="{{ url_for('index') }}" class="nav-link">Dashboard</a>
-                <a href="{{ url_for('setup') }}" class="nav-link">Upload CV</a>
-                <a href="{{ url_for('profile') }}" class="nav-link">Profile</a>
-                <a href="{{ url_for('preferences_route') }}" class="nav-link">Preferences</a>
-                <a href="{{ url_for('resume_settings_route') }}" class="nav-link">Resume Config</a>
-                <a href="{{ url_for('results') }}" class="nav-link btn-nav">Results</a>
+                <a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">Dashboard</a>
+                <a href="{{ url_for('setup') }}" class="nav-link {% if request.endpoint == 'setup' %}active{% endif %}">Upload CV</a>
+                <a href="{{ url_for('profile') }}" class="nav-link {% if request.endpoint == 'profile' %}active{% endif %}">Profile</a>
+                <a href="{{ url_for('preferences_route') }}" class="nav-link {% if request.endpoint == 'preferences_route' %}active{% endif %}">Preferences</a>
+                <a href="{{ url_for('resume_settings_route') }}" class="nav-link {% if request.endpoint == 'resume_settings_route' %}active{% endif %}">Resume Config</a>
+                <a href="{{ url_for('results') }}" class="nav-link {% if request.endpoint == 'results' %}active{% endif %}">Results</a>
             </nav>
         </div>
     </header>

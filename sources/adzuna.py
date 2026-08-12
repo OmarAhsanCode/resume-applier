@@ -26,7 +26,10 @@ def load_adzuna_config() -> Dict[str, Any]:
                     if not app_key:
                         app_key = cfg.get("app_key", "")
                     country = cfg.get("country", country)
-                    enabled = cfg.get("enabled", enabled)
+                    if not (os.getenv("ADZUNA_APP_ID") and os.getenv("ADZUNA_APP_KEY")):
+                        enabled = cfg.get("enabled", enabled)
+                    else:
+                        enabled = True
         except Exception as e:
             logger.warning(f"Failed to load Adzuna config from {config_path}: {e}")
 

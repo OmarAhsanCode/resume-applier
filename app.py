@@ -22,7 +22,19 @@ database.init_db()
 # In-memory background thread state for runs
 _active_run_lock = threading.Lock()
 _active_run_thread = None
-_latest_progress = {"status": "idle", "stage": "Ready", "details": "No active run."}
+_active_stop_requested = False
+_active_run_id = None
+_latest_progress = {"status": "idle", "stage": "Ready", "details": "No active run.", "logs": []}
+
+def add_log_entry(msg: str):
+    from datetime import datetime
+    time_str = datetime.now().strftime("%H:%M:%S")
+    log_line = f"[{time_str}] {msg}"
+    logs = _latest_progress.setdefault("logs", [])
+    logs.append(log_line)
+    # Keep last 200 logs
+    if len(logs) > 200:
+        _latest_progress["logs"] = logs[-200:]
 
 # ---------------------------------------------------------------------------
 # Dashboard & Setup Routes
@@ -121,7 +133,7 @@ def profile():
                 master_resume_path=existing.get("master_resume_path") if existing else None
             )
             flash("Candidate profile saved successfully!", "success")
-            return redirect(url_for("preferences"))
+            return redirect(url_for("preferences_route"))
         except Exception as e:
             flash(f"Error saving profile: {e}", "error")
 
@@ -187,7 +199,7 @@ def resume_settings_route():
 
 @app.route("/run", methods=["POST"])
 def trigger_run():
-    global _active_run_thread, _latest_progress
+    global _active_run_thread, _active_stop_requested, _active_run_id, _latest_progress
     
     candidate = database.get_candidate()
     if not candidate:
@@ -199,41 +211,81 @@ def trigger_run():
         if _active_run_thread and _active_run_thread.is_alive():
             return jsonify({"status": "error", "message": "A job search run is already in progress."}), 409
 
-        _latest_progress = {"status": "running", "stage": "Starting", "details": "Initiating job search pipeline..."}
+        _active_stop_requested = False
+        _latest_progress = {
+            "status": "running",
+            "stage": "Starting",
+            "details": "Initiating job search pipeline...",
+            "logs": []
+        }
+        add_log_entry("Initiating job search pipeline...")
 
         def _worker_callback(progress_info):
             global _latest_progress
-            _latest_progress = {
-                "status": "running",
-                "stage": progress_info.get("stage"),
-                "details": progress_info.get("details"),
-                "extra": progress_info.get("extra")
-            }
+            stg = progress_info.get("stage", "Running")
+            det = progress_info.get("details", "")
+            _latest_progress["status"] = "running"
+            _latest_progress["stage"] = stg
+            _latest_progress["details"] = det
+            if "extra" in progress_info and progress_info["extra"]:
+                _latest_progress["extra"] = progress_info["extra"]
+            if det:
+                add_log_entry(f"[{stg}] {det}")
+
+        def check_stop():
+            return _active_stop_requested
 
         def _run_target():
-            global _latest_progress
+            global _latest_progress, _active_run_id
             res = jobs.run_job_search_pipeline(
                 requested_jobs=requested_jobs,
-                progress_callback=_worker_callback
+                progress_callback=_worker_callback,
+                stop_checker=check_stop
             )
-            _latest_progress = {
-                "status": res.get("status", "completed"),
-                "stage": "Finished",
-                "details": f"Completed run. {res.get('selected_count', 0)} jobs selected.",
-                "result": res
-            }
+            _active_run_id = res.get("run_id")
+            final_st = res.get("status", "completed")
+            _latest_progress["status"] = final_st
+            _latest_progress["stage"] = "Finished" if final_st == "completed" else ("Stopped" if final_st == "stopped" else "Failed")
+            _latest_progress["details"] = res.get("message", f"Run {final_st}.")
+            _latest_progress["result"] = res
+            add_log_entry(f"Pipeline run {final_st}: {res.get('message', '')}")
 
         _active_run_thread = threading.Thread(target=_run_target, daemon=True)
         _active_run_thread.start()
 
     return jsonify({"status": "started", "message": f"Job search started for {requested_jobs} jobs."})
 
+@app.route("/run/stop", methods=["POST"])
+def stop_run():
+    global _active_stop_requested
+    with _active_run_lock:
+        if not (_active_run_thread and _active_run_thread.is_alive()):
+            return jsonify({"status": "error", "message": "No active run to stop."}), 400
+        _active_stop_requested = True
+        add_log_entry("Stop requested by user. Performing cooperative cancellation...")
+    return jsonify({"status": "success", "message": "Stop requested. Pipeline will stop at next safe checkpoint."})
+
+@app.route("/database/clear", methods=["POST"])
+def clear_database():
+    global _latest_progress
+    with _active_run_lock:
+        if _active_run_thread and _active_run_thread.is_alive():
+            return jsonify({"status": "error", "message": "Stop the current run before clearing the database."}), 409
+        database.clear_jobs_and_runs()
+        _latest_progress = {"status": "idle", "stage": "Ready", "details": "Database cleared.", "logs": ["Database cleared."]}
+    return jsonify({"status": "success", "message": "Jobs and run history cleared successfully."})
+
 @app.route("/run/status")
 def run_status():
     latest_run = database.get_latest_run()
+    is_active = bool(_active_run_thread and _active_run_thread.is_alive())
     return jsonify({
+        "active": is_active,
+        "run_id": _active_run_id or (latest_run["id"] if latest_run else None),
+        "status": _latest_progress.get("status", "idle"),
         "progress": _latest_progress,
-        "latest_run": latest_run
+        "latest_run": latest_run,
+        "logs": _latest_progress.get("logs", [])
     })
 
 # ---------------------------------------------------------------------------
@@ -249,7 +301,16 @@ def results():
         all_jobs = [j for j in all_jobs if j.get("status") != 'new']
     else:
         all_jobs = database.get_all_jobs(status_filter=status_filter, limit=100)
-    return render_template("results.html", jobs=all_jobs, current_filter=status_filter)
+
+    sheets_id = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID")
+    google_sheets_url = f"https://docs.google.com/spreadsheets/d/{sheets_id}" if sheets_id else None
+
+    return render_template(
+        "results.html",
+        jobs=all_jobs,
+        current_filter=status_filter,
+        google_sheets_url=google_sheets_url
+    )
 
 import google_service
 

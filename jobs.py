@@ -256,10 +256,23 @@ def calculate_deterministic_score(candidate_profile: Dict[str, Any], preferences
 
     total_score = role_score + location_score + exp_score + emp_score + skill_score
 
-    # Dream Company Bonus (+8 pts)
+    # Company Priority & Dream Company Ranking Boost (+3 to +8 pts, capped at 100)
+    comp_clean = company.lower()
     dream_companies = [c.lower() for c in preferences.get("dream_companies", [])]
-    if any(dc in company for dc in dream_companies if dc):
-        total_score += 8.0
+    company_priority = job.get("company_priority")
+    if not company_priority:
+        if any(dc in comp_clean for dc in dream_companies if dc):
+            company_priority = 100
+        else:
+            company_priority = 50
+
+    priority_bonus = 0.0
+    if any(dc in comp_clean for dc in dream_companies if dc):
+        priority_bonus = 8.0
+    elif isinstance(company_priority, (int, float)) and company_priority > 50:
+        priority_bonus = round(((company_priority - 50) / 50.0) * 5.0, 1)
+
+    total_score += priority_bonus
 
     return min(100.0, round(total_score, 1))
 
@@ -270,11 +283,13 @@ def calculate_deterministic_score(candidate_profile: Dict[str, Any], preferences
 def run_job_search_pipeline(
     requested_jobs: int = 50,
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    stop_checker: Optional[Callable[[], bool]] = None,
     db_path: str = None
 ) -> Dict[str, Any]:
     """
     Executes complete job discovery, deduplication, filtering, deterministic ranking,
     AI evaluation, resume tailoring, LaTeX rendering, PDF compilation, and Drive/Sheets sync.
+    Supports cooperative cancellation via stop_checker and run-scoped job cleanup.
     """
     db_path = db_path or database.DB_PATH
     database.init_db(db_path)
@@ -294,7 +309,23 @@ def run_job_search_pipeline(
         if progress_callback:
             progress_callback({"run_id": run_id, "stage": stage, "details": details, "extra": extra})
 
+    def handle_stop():
+        logger.info(f"Run #{run_id}: Stop requested by user. Cleaning up jobs from this run...")
+        deleted_count = database.delete_jobs_by_run_id(run_id, db_path=db_path)
+        msg = f"Run stopped. {deleted_count} jobs discovered during this run were removed."
+        database.update_run_progress(run_id, status="stopped", error=msg, db_path=db_path)
+        report_progress("Stopped", msg, {"status": "stopped", "deleted_count": deleted_count})
+        return {
+            "status": "stopped",
+            "run_id": run_id,
+            "message": msg,
+            "deleted_count": deleted_count
+        }
+
     try:
+        if stop_checker and stop_checker():
+            return handle_stop()
+
         # Step 1: Load Profile & Preferences
         report_progress("Initializing", "Loading candidate profile and preferences...")
         candidate = database.get_candidate(db_path=db_path)
@@ -312,6 +343,9 @@ def run_job_search_pipeline(
         }
         resume_settings = database.get_resume_settings(db_path=db_path)
 
+        if stop_checker and stop_checker():
+            return handle_stop()
+
         # Step 2: Job Discovery across sources
         report_progress("Discovery", "Discovering jobs from registered sources...")
         discovered_jobs = sources.discover_all_sources(preferences)
@@ -328,6 +362,9 @@ def run_job_search_pipeline(
             {"discovered_count": discovered_count, "source_counts": source_counts}
         )
 
+        if stop_checker and stop_checker():
+            return handle_stop()
+
         # Step 3: Deduplication & Hard Filtering
         report_progress("Deduplication & Filtering", "Checking job history and deduplicating...")
         duplicate_count = 0
@@ -335,6 +372,10 @@ def run_job_search_pipeline(
         valid_candidate_jobs = []
 
         for job in discovered_jobs:
+            if stop_checker and stop_checker():
+                return handle_stop()
+
+            job["run_id"] = run_id
             u_id = job["unique_id"]
             if database.job_exists(u_id, db_path=db_path):
                 database.update_job_last_seen(u_id, db_path=db_path)
@@ -379,6 +420,9 @@ def run_job_search_pipeline(
                 "message": msg
             }
 
+        if stop_checker and stop_checker():
+            return handle_stop()
+
         # Step 4: Sort by deterministic score and pick top pool for AI analysis
         valid_candidate_jobs.sort(key=lambda j: j["deterministic_score"], reverse=True)
         ai_pool_size = min(len(valid_candidate_jobs), max(requested_jobs * 2, 5))
@@ -390,6 +434,9 @@ def run_job_search_pipeline(
         scored_jobs = []
 
         for idx, job in enumerate(ai_candidate_pool, 1):
+            if stop_checker and stop_checker():
+                return handle_stop()
+
             report_progress("AI Analysis", f"Analyzing job {idx}/{len(ai_candidate_pool)}: {job['title']} at {job['company']}")
             try:
                 analysis = ai.analyze_job(profile, job)
@@ -418,6 +465,9 @@ def run_job_search_pipeline(
 
         report_progress("AI Analysis", f"AI Analysis completed for {analyzed_count} jobs.", {"analyzed_count": analyzed_count})
 
+        if stop_checker and stop_checker():
+            return handle_stop()
+
         # Step 6: Select Top N jobs
         scored_jobs.sort(key=lambda j: j["final_score"], reverse=True)
         selected_jobs = scored_jobs[:requested_jobs]
@@ -427,6 +477,9 @@ def run_job_search_pipeline(
             database.update_job_status(s_job["id"], "selected", db_path=db_path)
 
         report_progress("Selection", f"Selected top {selected_count} jobs.", {"selected_count": selected_count})
+
+        if stop_checker and stop_checker():
+            return handle_stop()
 
         # Step 7: Sync Google Sheet
         report_progress("Google Sheets", "Syncing selected job dashboard to Google Sheets...")

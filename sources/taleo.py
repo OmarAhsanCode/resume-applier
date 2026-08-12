@@ -50,8 +50,35 @@ def discover_jobs(search_config: Dict[str, Any] = None) -> List[Dict[str, Any]]:
                 content = resp.text
                 if "<rss" in content.lower() or "<?xml" in content.lower():
                     try:
+                        import xml.etree.ElementTree as ET
+                        root = ET.fromstring(content)
+                        items = root.findall(".//item")
+                        for item in items:
+                            title_elem = item.find("title")
+                            link_elem = item.find("link")
+                            desc_elem = item.find("description")
+                            
+                            title = title_elem.text if title_elem is not None and title_elem.text else "Job Position"
+                            link = link_elem.text if link_elem is not None and link_elem.text else career_url
+                            desc = desc_elem.text if desc_elem is not None and desc_elem.text else title
+                            job_id = link.split("job=")[-1] if "job=" in link else None
+
+                            norm_job = create_normalized_job(
+                                source="taleo",
+                                source_job_id=job_id,
+                                company=company,
+                                title=title,
+                                location="Remote",
+                                employment_type="full_time",
+                                description=desc,
+                                application_url=link,
+                                job_url=link,
+                                apply_url=link
+                            )
+                            normalized_jobs.append(norm_job)
+                    except Exception:
                         from bs4 import BeautifulSoup
-                        soup = BeautifulSoup(content, "xml")
+                        soup = BeautifulSoup(content, "html.parser")
                         items = soup.find_all("item")
                         for item in items:
                             title = item.find("title").text if item.find("title") else "Job Position"

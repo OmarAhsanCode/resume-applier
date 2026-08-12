@@ -22,17 +22,23 @@ class AIProvider:
         self.base_url = (base_url or "").rstrip("/")
         self.model_name = model_name
         self.rate_limit_reset_time = 0.0
+        self.disabled_until = 0.0
 
     def is_available(self) -> bool:
         if not self.api_key or self.api_key == "mock_key":
             return False
-        if time.time() < self.rate_limit_reset_time:
+        now = time.time()
+        if now < self.rate_limit_reset_time or now < self.disabled_until:
             return False
         return True
 
     def mark_rate_limited(self, cooldown_seconds: float = 60.0):
         self.rate_limit_reset_time = time.time() + cooldown_seconds
-        logger.warning(f"Provider '{self.name}' marked rate-limited for {cooldown_seconds:.1f}s.")
+        logger.warning(f"AI Router: Provider '{self.name}' marked rate-limited for {cooldown_seconds:.1f}s.")
+
+    def mark_auth_disabled(self, cooldown_seconds: float = 300.0):
+        self.disabled_until = time.time() + cooldown_seconds
+        logger.error(f"AI Router: Provider '{self.name}' auth error (401/403). Disabled for {cooldown_seconds:.1f}s.")
 
     def call_chat_completion(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 1200) -> Optional[str]:
         if not self.is_available():
@@ -58,6 +64,15 @@ class AIProvider:
         try:
             url = f"{self.base_url}/chat/completions"
             response = requests.post(url, headers=headers, json=payload, timeout=30)
+            
+            # Retry without response_format if model or gateway rejects json_object mode (400 Bad Request)
+            if response.status_code == 400 and "response_format" in payload:
+                payload_no_rf = dict(payload)
+                del payload_no_rf["response_format"]
+                retry_resp = requests.post(url, headers=headers, json=payload_no_rf, timeout=30)
+                if retry_resp.status_code == 200:
+                    response = retry_resp
+
             if response.status_code == 429:
                 retry_after = response.headers.get("Retry-After") or response.headers.get("retry-after")
                 try:
@@ -66,68 +81,152 @@ class AIProvider:
                     cooldown = 60.0
                 self.mark_rate_limited(cooldown)
                 return None
+            elif response.status_code in (401, 403):
+                self.mark_auth_disabled()
+                return None
+            elif response.status_code in (408, 500, 502, 503, 504):
+                self.mark_rate_limited(60.0)
+                return None
 
             response.raise_for_status()
             data = response.json()
-            return data["choices"][0]["message"]["content"]
+            if "choices" in data and len(data["choices"]) > 0:
+                choice = data["choices"][0]
+                message = choice.get("message", {})
+                content = message.get("content")
+                if content is not None:
+                    return str(content)
+            return None
         except Exception as e:
-            logger.warning(f"Provider '{self.name}' call failed: {e}")
+            logger.warning(f"AI Router: Provider '{self.name}' call failed: {e}")
             return None
 
 class AIRouter:
     def __init__(self):
+        self.providers = []
+        self._init_providers()
+
+    def _init_providers(self):
         p_key = os.getenv("GROQ_API_KEY") or os.getenv("AI_API_KEY", "mock_key")
         p_url = os.getenv("GROQ_BASE_URL") or os.getenv("AI_BASE_URL", "https://api.groq.com/openai/v1")
         p_model = os.getenv("GROQ_MODEL_NAME") or os.getenv("AI_MODEL_NAME", "llama-3.3-70b-versatile")
-        self.primary = AIProvider("PrimaryGroq", p_key, p_url, p_model)
+        primary = AIProvider("PrimaryGroq", p_key, p_url, p_model)
 
         s_key = os.getenv("SECOND_AI_API_KEY", "mock_key")
         s_url = os.getenv("SECOND_AI_BASE_URL", "https://api.groq.com/openai/v1")
         s_model = os.getenv("SECOND_AI_MODEL_NAME", "llama-3.3-70b-versatile")
-        self.secondary = AIProvider("SecondaryFallback", s_key, s_url, s_model)
+        secondary = AIProvider("SecondaryFallback", s_key, s_url, s_model)
+
+        t_key = os.getenv("THIRD_AI_API_KEY", "mock_key")
+        t_url = os.getenv("THIRD_AI_BASE_URL", "https://openrouter.ai/api/v1")
+        t_model = os.getenv("THIRD_AI_MODEL_NAME", "meta-llama/llama-3.3-70b-instruct")
+        third = AIProvider("ThirdFallback", t_key, t_url, t_model)
+
+        self.providers = [primary, secondary, third]
+
+    @property
+    def primary(self) -> AIProvider:
+        return self.providers[0]
+
+    @primary.setter
+    def primary(self, val: AIProvider):
+        self.providers[0] = val
+
+    @property
+    def secondary(self) -> AIProvider:
+        return self.providers[1]
+
+    @secondary.setter
+    def secondary(self, val: AIProvider):
+        self.providers[1] = val
+
+    @property
+    def third(self) -> AIProvider:
+        return self.providers[2]
+
+    @third.setter
+    def third(self, val: AIProvider):
+        self.providers[2] = val
+
+    def get_available_providers(self) -> list:
+        return [p for p in self.providers if p.is_available()]
 
     def call_ai(self, prompt: str, system_prompt: Optional[str] = None, max_tokens: int = 1200) -> Optional[str]:
-        if self.primary.is_available():
-            res = self.primary.call_chat_completion(prompt, system_prompt, max_tokens)
+        available = self.get_available_providers()
+        if not available:
+            logger.warning("AI Router: All configured providers failed or unavailable.")
+            return None
+
+        for idx, provider in enumerate(self.providers):
+            if not provider.is_available():
+                logger.info(f"AI Router: Provider '{provider.name}' is unavailable/cooling down. Skipping.")
+                continue
+
+            if idx > 0:
+                logger.info(f"AI Router: Falling back to Provider '{provider.name}'...")
+
+            res = provider.call_chat_completion(prompt, system_prompt, max_tokens)
             if res:
+                logger.info(f"AI Router: Provider '{provider.name}' succeeded.")
                 return res
 
-        if self.secondary.is_available():
-            logger.info("Failing over to Secondary AI Provider...")
-            res = self.secondary.call_chat_completion(prompt, system_prompt, max_tokens)
-            if res:
-                return res
-
+        logger.warning("AI Router: All configured providers failed or unavailable.")
         return None
 
 def robust_json_loads(raw: str) -> Any:
-    if not raw:
-        raise ValueError("Empty response")
-    raw = raw.strip()
-    if raw.startswith("```"):
-        lines = raw.splitlines()
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        raw = "\n".join(lines).strip()
+    if not raw or not isinstance(raw, str):
+        raise ValueError("Empty or non-string response from AI model")
     
-    start = raw.find("{")
-    end = raw.rfind("}")
-    if start != -1 and end != -1:
-        raw = raw[start:end+1]
+    s = raw.strip()
+    if not s:
+        raise ValueError("Empty response from AI model after stripping whitespace")
+
+    # 1. Strip reasoning/thinking blocks (<think>...</think> or <thought>...</thought>)
+    s = re.sub(r"<(think|thought)>.*?</\1>", "", s, flags=re.DOTALL | re.IGNORECASE).strip()
+
+    # 2. Extract content inside markdown code blocks ```json ... ``` or ``` ... ```
+    code_block_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", s, flags=re.DOTALL | re.IGNORECASE)
+    if not code_block_match:
+        code_block_match = re.search(r"```(?:json)?\s*(.*?)\s*```", s, flags=re.DOTALL | re.IGNORECASE)
     
+    if code_block_match:
+        candidate_inside = code_block_match.group(1).strip()
+        if "{" in candidate_inside and "}" in candidate_inside:
+            s = candidate_inside
+
+    # 3. Locate the outermost '{' ... '}' JSON object
+    start = s.find("{")
+    end = s.rfind("}")
+    if start != -1 and end != -1 and start <= end:
+        s = s[start:end+1]
+    else:
+        raise ValueError(f"No valid JSON object {{}} found in response: '{raw[:80]}...'")
+
+    # 4. Standard json.loads
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError as e:
-        import re
-        def replace_newlines(match):
-            return match.group(0).replace("\n", "\\n").replace("\r", "\\r")
-        cleaned = re.sub(r'"([^"\\]|\\.)*"', replace_newlines, raw, flags=re.DOTALL)
+        return json.loads(s)
+    except json.JSONDecodeError:
+        pass
+
+    # 5. Normalization heuristics for common LLM JSON syntax errors:
+    # A. Remove trailing commas before closing braces/brackets
+    cleaned = re.sub(r",\s*([\}\]])", r"\1", s)
+    
+    # B. Fix unescaped newlines/tabs inside string literals
+    def fix_string_literal(match):
+        val = match.group(0)
+        return val.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+
+    cleaned = re.sub(r'"(?:[^"\\]|\\.)*"', fix_string_literal, cleaned, flags=re.DOTALL)
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError as err:
         try:
-            return json.loads(cleaned)
-        except json.JSONDecodeError:
-            raise e
+            cleaned_strict = re.sub(r"[\x00-\x1F\x7F]", "", cleaned)
+            return json.loads(cleaned_strict)
+        except Exception:
+            raise ValueError(f"Failed to parse JSON: {err}. Snippet: '{cleaned[:100]}...'")
 
 _router = AIRouter()
 

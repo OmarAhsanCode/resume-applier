@@ -60,6 +60,7 @@ def init_db(db_path: str = None) -> None:
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS jobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER,
         source TEXT NOT NULL,
         source_job_id TEXT,
         unique_id TEXT NOT NULL UNIQUE,
@@ -84,6 +85,12 @@ def init_db(db_path: str = None) -> None:
         updated_at TEXT NOT NULL
     );
     """)
+
+    # Migration: Add run_id column if table was created previously without run_id
+    try:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN run_id INTEGER;")
+    except sqlite3.OperationalError:
+        pass
 
     # Runs table
     cursor.execute("""
@@ -243,6 +250,7 @@ def save_job(job_data: Dict[str, Any], db_path: str = None) -> int:
         job_id = existing["id"]
         conn.execute("""
         UPDATE jobs SET
+            run_id = COALESCE(?, run_id),
             company = COALESCE(?, company),
             title = COALESCE(?, title),
             location = COALESCE(?, location),
@@ -254,6 +262,7 @@ def save_job(job_data: Dict[str, Any], db_path: str = None) -> int:
             updated_at = ?
         WHERE unique_id = ?
         """, (
+            job_data.get("run_id"),
             job_data.get("company"), job_data.get("title"), job_data.get("location"),
             job_data.get("employment_type"), job_data.get("description"), job_data.get("application_url"),
             job_data.get("posted_date"), now, now, unique_id
@@ -265,12 +274,13 @@ def save_job(job_data: Dict[str, Any], db_path: str = None) -> int:
     cursor = conn.cursor()
     cursor.execute("""
     INSERT INTO jobs (
-        source, source_job_id, unique_id, company, title, location, employment_type,
+        run_id, source, source_job_id, unique_id, company, title, location, employment_type,
         description, application_url, posted_date, first_seen, last_seen, status,
         deterministic_score, ai_score, final_score, ai_analysis, resume_json,
         resume_tex_path, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
+        job_data.get("run_id"),
         job_data.get("source"),
         job_data.get("source_job_id"),
         unique_id,
@@ -294,6 +304,25 @@ def save_job(job_data: Dict[str, Any], db_path: str = None) -> int:
     conn.commit()
     conn.close()
     return job_id
+
+def delete_jobs_by_run_id(run_id: int, db_path: str = None) -> int:
+    """Deletes ONLY jobs created/saved during a specific run_id."""
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM jobs WHERE run_id = ?", (run_id,))
+    deleted_count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted_count
+
+def clear_jobs_and_runs(db_path: str = None) -> None:
+    """Clears all records from jobs and runs tables."""
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM jobs;")
+    cursor.execute("DELETE FROM runs;")
+    conn.commit()
+    conn.close()
 
 def update_job_evaluation(job_id: int, deterministic_score: float = None, ai_score: float = None, final_score: float = None, ai_analysis: Dict = None, db_path: str = None) -> None:
     """Updates scores and AI analysis for a job."""
