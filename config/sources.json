@@ -13,7 +13,8 @@
     "clevertap",
     "stripe",
     "figma",
-    "datadog"
+    "datadog",
+    "razorpaysoftwareprivatelimited"
   ],
   "lever": [
     "postman",
@@ -36,13 +37,20 @@
       "host": "nvidia.wd5.myworkdayjobs.com",
       "tenant": "NVIDIAExternalCareerSite",
       "company_slug": "nvidia"
+    },
+    {
+      "company": "Salesforce India",
+      "host": "salesforce.wd12.myworkdayjobs.com",
+      "tenant": "External_Career_Site",
+      "company_slug": "salesforce"
     }
   ],
   "smartrecruiters": [
     "Visa",
     "Bosch",
     "Square",
-    "Ubisoft"
+    "Ubisoft",
+    "freshworks"
   ],
   "taleo": {
     "enabled": false,

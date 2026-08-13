@@ -187,6 +187,10 @@ function confirmClearDatabase() {
         });
 }
 
+function confirmClearDb() {
+    confirmClearDatabase();
+}
+
 function openDetailsModal(jobId, company, title) {
     const scriptEl = document.getElementById(`job-detail-data-${jobId}`);
     const modal = document.getElementById('modal-job-details');

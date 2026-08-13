@@ -34,11 +34,13 @@ class TestMultiProviderAI(unittest.TestCase):
         router = AIRouter()
         router.primary = AIProvider("PrimaryMock", "key_1", "https://api.groq.com/openai/v1", "model_1")
         router.secondary = AIProvider("SecondaryMock", "key_2", "https://api.secondary.com/v1", "model_2")
+        router.third = AIProvider("ThirdMock", "key_3", "https://api.third.com/v1", "model_3")
 
         with patch.object(router.primary, 'call_chat_completion', return_value=None):
             with patch.object(router.secondary, 'call_chat_completion', return_value=None):
-                res = router.call_ai("Test prompt")
-                self.assertIsNone(res)
+                with patch.object(router.third, 'call_chat_completion', return_value=None):
+                    res = router.call_ai("Test prompt")
+                    self.assertIsNone(res)
 
 if __name__ == '__main__':
     unittest.main()

@@ -118,6 +118,12 @@ def init_db(db_path: str = None) -> None:
     except sqlite3.OperationalError:
         pass
 
+    # Migration: Track when a job was last surfaced/shown to the user in results
+    try:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN last_shown_at TEXT DEFAULT NULL;")
+    except sqlite3.OperationalError:
+        pass
+
     # Runs table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS runs (
@@ -266,6 +272,47 @@ def update_job_last_seen(unique_id: str, db_path: str = None) -> None:
     conn.execute("UPDATE jobs SET last_seen = ?, updated_at = ? WHERE unique_id = ?", (now, now, unique_id))
     conn.commit()
     conn.close()
+
+def mark_jobs_shown(job_ids: List[int], db_path: str = None) -> None:
+    """Records that a list of jobs were surfaced to the user (updates last_shown_at)."""
+    if not job_ids:
+        return
+    conn = get_connection(db_path)
+    now = datetime.now().isoformat()
+    conn.executemany(
+        "UPDATE jobs SET last_shown_at = ?, updated_at = ? WHERE id = ?",
+        [(now, now, jid) for jid in job_ids]
+    )
+    conn.commit()
+    conn.close()
+
+def get_previously_shown_jobs(
+    excluded_statuses: List[str] = None,
+    limit: int = 500,
+    db_path: str = None
+) -> List[Dict[str, Any]]:
+    """
+    Returns previously discovered jobs that are eligible to be re-shown,
+    ordered by least-recently-shown first (never-shown last — those are handled
+    as new in the pipeline; this is the fallback pool when new jobs are scarce).
+
+    Excluded statuses: applied, rejected, and any others that should never resurface.
+    """
+    if excluded_statuses is None:
+        excluded_statuses = ["applied", "rejected"]
+    placeholders = ",".join("?" for _ in excluded_statuses)
+    conn = get_connection(db_path)
+    rows = conn.execute(f"""
+        SELECT * FROM jobs
+        WHERE status NOT IN ({placeholders})
+        ORDER BY
+            CASE WHEN last_shown_at IS NULL THEN 1 ELSE 0 END ASC,
+            last_shown_at ASC,
+            CASE WHEN final_score IS NOT NULL THEN final_score ELSE 0 END DESC
+        LIMIT ?
+    """, (*excluded_statuses, limit)).fetchall()
+    conn.close()
+    return [_hydrate_job_record(dict(r)) for r in rows]
 
 def save_job(job_data: Dict[str, Any], db_path: str = None) -> int:
     """Inserts a new job or updates an existing one if unique_id exists."""

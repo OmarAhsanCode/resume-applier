@@ -88,9 +88,13 @@ class TestPipeline(unittest.TestCase):
         self.assertTrue(score_dream > score_normal)
 
     def test_google_service_fallback(self):
-        # Without credentials, sync should return False without throwing an exception
-        sheet_ok = google_service.sync_jobs_to_sheet([])
-        self.assertFalse(sheet_ok)
+        # Without configured SPREADSHEET_ID, sync should return False without throwing
+        # Patch the internal helper so real .env values don't interfere
+        from unittest.mock import patch as _patch
+        with _patch.object(google_service, '_spreadsheet_id', return_value=""):
+            with _patch.object(google_service, 'ensure_sheets_service', return_value=False):
+                sheet_ok = google_service.sync_jobs_to_sheet([])
+                self.assertFalse(sheet_ok)
 
     def test_normalize_url_with_query_params(self):
         url = "https://jobs.lever.co/company/abc12345/?gh_jid=123&utm_source=feed"

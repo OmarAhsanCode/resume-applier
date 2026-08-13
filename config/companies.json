@@ -8,12 +8,13 @@
     "source": "greenhouse",
     "source_identifier": "razorpay",
     "enabled": true,
-    "verified": false,
-    "verification_status": "unverified",
-    "jobs_found": null,
-    "last_verified": null,
-    "jobs_available": null,
-    "jobs_retrieved": null
+    "verified": true,
+    "verification_status": "verified_api",
+    "jobs_found": 22,
+    "last_verified": "2026-08-13 22:16:42",
+    "jobs_available": 22,
+    "jobs_retrieved": 22,
+    "access_strategy": "api"
   },
   {
     "company": "Postman",
@@ -25,11 +26,12 @@
     "source_identifier": "postman",
     "enabled": true,
     "verified": false,
-    "verification_status": "unverified",
+    "verification_status": "access_restricted",
     "jobs_found": null,
-    "last_verified": null,
+    "last_verified": "2026-08-13 22:16:59",
     "jobs_available": null,
-    "jobs_retrieved": null
+    "jobs_retrieved": 0,
+    "access_strategy": "unavailable"
   },
   {
     "company": "BrowserStack",
@@ -41,11 +43,12 @@
     "source_identifier": "browserstack",
     "enabled": true,
     "verified": false,
-    "verification_status": "unverified",
+    "verification_status": "access_restricted",
     "jobs_found": null,
-    "last_verified": null,
+    "last_verified": "2026-08-13 22:17:13",
     "jobs_available": null,
-    "jobs_retrieved": null
+    "jobs_retrieved": 0,
+    "access_strategy": "unavailable"
   },
   {
     "company": "Freshworks",
@@ -56,12 +59,13 @@
     "source": "greenhouse",
     "source_identifier": "freshworks",
     "enabled": true,
-    "verified": false,
-    "verification_status": "unverified",
-    "jobs_found": null,
-    "last_verified": null,
-    "jobs_available": null,
-    "jobs_retrieved": null
+    "verified": true,
+    "verification_status": "verified_api",
+    "jobs_found": 100,
+    "last_verified": "2026-08-13 22:17:27",
+    "jobs_available": 100,
+    "jobs_retrieved": 100,
+    "access_strategy": "api"
   },
   {
     "company": "Chargebee",
@@ -73,11 +77,12 @@
     "source_identifier": "chargebee",
     "enabled": true,
     "verified": false,
-    "verification_status": "unverified",
+    "verification_status": "access_restricted",
     "jobs_found": null,
-    "last_verified": null,
+    "last_verified": "2026-08-13 22:17:42",
     "jobs_available": null,
-    "jobs_retrieved": null
+    "jobs_retrieved": 0,
+    "access_strategy": "unavailable"
   },
   {
     "company": "Swiggy",
@@ -89,11 +94,12 @@
     "source_identifier": "swiggy",
     "enabled": true,
     "verified": false,
-    "verification_status": "unverified",
+    "verification_status": "access_restricted",
     "jobs_found": null,
-    "last_verified": null,
+    "last_verified": "2026-08-13 22:17:51",
     "jobs_available": null,
-    "jobs_retrieved": null
+    "jobs_retrieved": 0,
+    "access_strategy": "unavailable"
   },
   {
     "company": "Zomato",
@@ -105,11 +111,12 @@
     "source_identifier": "zomato",
     "enabled": true,
     "verified": false,
-    "verification_status": "unverified",
+    "verification_status": "no_jobs_found",
     "jobs_found": null,
-    "last_verified": null,
+    "last_verified": "2026-08-13 22:17:55",
     "jobs_available": null,
-    "jobs_retrieved": null
+    "jobs_retrieved": 0,
+    "access_strategy": "unavailable"
   },
   {
     "company": "PhonePe",
@@ -121,11 +128,12 @@
     "source_identifier": "phonepe",
     "enabled": true,
     "verified": false,
-    "verification_status": "unverified",
+    "verification_status": "no_jobs_found",
     "jobs_found": null,
-    "last_verified": null,
+    "last_verified": "2026-08-13 22:18:01",
     "jobs_available": null,
-    "jobs_retrieved": null
+    "jobs_retrieved": 0,
+    "access_strategy": "unavailable"
   },
   {
     "company": "CRED",
@@ -137,11 +145,12 @@
     "source_identifier": "cred",
     "enabled": true,
     "verified": false,
-    "verification_status": "unverified",
+    "verification_status": "access_restricted",
     "jobs_found": null,
-    "last_verified": null,
+    "last_verified": "2026-08-13 22:18:07",
     "jobs_available": null,
-    "jobs_retrieved": null
+    "jobs_retrieved": 0,
+    "access_strategy": "unavailable"
   },
   {
     "company": "Atlassian India",
@@ -153,11 +162,12 @@
     "source_identifier": "atlassian",
     "enabled": true,
     "verified": false,
-    "verification_status": "unverified",
+    "verification_status": "access_restricted",
     "jobs_found": null,
-    "last_verified": null,
+    "last_verified": "2026-08-13 22:18:19",
     "jobs_available": null,
-    "jobs_retrieved": null
+    "jobs_retrieved": 0,
+    "access_strategy": "unavailable"
   },
   {
     "company": "Uber India",
@@ -169,11 +179,12 @@
     "source_identifier": "uber",
     "enabled": true,
     "verified": false,
-    "verification_status": "unverified",
+    "verification_status": "verification_failed",
     "jobs_found": null,
-    "last_verified": null,
+    "last_verified": "2026-08-13 22:30:28",
     "jobs_available": null,
-    "jobs_retrieved": null
+    "jobs_retrieved": 0,
+    "access_strategy": "unavailable"
   },
   {
     "company": "Adobe India",
@@ -184,12 +195,15 @@
     "source": "workday",
     "source_identifier": "adobe",
     "enabled": true,
-    "verified": false,
-    "verification_status": "unverified",
-    "jobs_found": null,
-    "last_verified": null,
-    "jobs_available": null,
-    "jobs_retrieved": null
+    "verified": true,
+    "verification_status": "verified_api",
+    "jobs_found": 790,
+    "last_verified": "2026-08-13 22:18:52",
+    "jobs_available": 790,
+    "jobs_retrieved": 20,
+    "ats_host": "adobe.wd5.myworkdayjobs.com",
+    "ats_tenant": "external_experienced",
+    "access_strategy": "api"
   },
   {
     "company": "NVIDIA India",
@@ -200,12 +214,15 @@
     "source": "workday",
     "source_identifier": "nvidia",
     "enabled": true,
-    "verified": false,
-    "verification_status": "unverified",
-    "jobs_found": null,
-    "last_verified": null,
-    "jobs_available": null,
-    "jobs_retrieved": null
+    "verified": true,
+    "verification_status": "verified_api",
+    "jobs_found": 20,
+    "last_verified": "2026-08-13 22:18:59",
+    "jobs_available": 2000,
+    "jobs_retrieved": 20,
+    "ats_host": "nvidia.wd5.myworkdayjobs.com",
+    "ats_tenant": "NVIDIAExternalCareerSite",
+    "access_strategy": "api"
   },
   {
     "company": "Salesforce India",
@@ -216,12 +233,15 @@
     "source": "workday",
     "source_identifier": "salesforce",
     "enabled": true,
-    "verified": false,
-    "verification_status": "unverified",
-    "jobs_found": null,
-    "last_verified": null,
-    "jobs_available": null,
-    "jobs_retrieved": null
+    "verified": true,
+    "verification_status": "verified_api",
+    "jobs_found": 20,
+    "last_verified": "2026-08-13 22:19:20",
+    "jobs_available": 1521,
+    "jobs_retrieved": 20,
+    "ats_host": "salesforce.wd12.myworkdayjobs.com",
+    "ats_tenant": "External_Career_Site",
+    "access_strategy": "api"
   },
   {
     "company": "Google India",

@@ -298,14 +298,14 @@ def verify_discovered_source(
 
     log_progress("Verifying job endpoint...")
 
-    company = candidate_info.get("company_name", "Unknown")
-    platform = candidate_info.get("ats_platform", "unknown").lower()
-    slug = (candidate_info.get("ats_slug") or company).lower().replace(" ", "").replace("&", "")
-    host = candidate_info.get("ats_host", "")
-    tenant = candidate_info.get("ats_tenant", "")
+    company = candidate_info.get("company_name") or "Unknown"
+    platform = (candidate_info.get("ats_platform") or "unknown").lower()
+    slug = (candidate_info.get("ats_slug") or company or "unknown").lower().replace(" ", "").replace("&", "")
+    host = candidate_info.get("ats_host") or ""
+    tenant = candidate_info.get("ats_tenant") or ""
     origin = candidate_info.get("source_origin") or ("ai" if platform != "unknown" else "speculative")
     is_speculative = (origin == "speculative" or platform == "unknown")
-    careers_url = candidate_info.get("careers_url", "")
+    careers_url = candidate_info.get("careers_url") or ""
 
     # Variables for state tracking
     endpoint_reachable = False
@@ -445,39 +445,44 @@ def verify_discovered_source(
                 except Exception as pe:
                     logger.debug(f"Failed to parse Workday careers_url: {pe}")
 
-            if not host or not tenant:
-                try:
-                    import os
-                    sources_path = os.path.join("config", "sources.json")
-                    if os.path.exists(sources_path):
-                        with open(sources_path, "r", encoding="utf-8") as f:
-                            sources_data = json.load(f)
-                            workday_configs = sources_data.get("workday", [])
-                            for cfg in workday_configs:
-                                if isinstance(cfg, dict):
-                                    company_slug = cfg.get("company_slug", "").lower()
-                                    company_name_cfg = cfg.get("company", "").lower()
-                                    if company_slug == slug or company_name_cfg == slug:
-                                        c_host = cfg.get("host")
-                                        c_tenant = cfg.get("tenant")
-                                        if c_host and c_tenant:
-                                            wd_candidates.append((c_host, c_tenant))
-                except Exception as e:
-                    logger.debug(f"Failed to load sources.json: {e}")
+            try:
+                import os
+                sources_path = os.path.join("config", "sources.json")
+                if os.path.exists(sources_path):
+                    with open(sources_path, "r", encoding="utf-8") as f:
+                        sources_data = json.load(f)
+                        workday_configs = sources_data.get("workday", [])
+                        for cfg in workday_configs:
+                            if isinstance(cfg, dict):
+                                company_slug = cfg.get("company_slug", "").lower()
+                                company_name_cfg = cfg.get("company", "").lower()
+                                if company_slug == slug or company_name_cfg == slug:
+                                    c_host = cfg.get("host")
+                                    c_tenant = cfg.get("tenant")
+                                    if c_host and c_tenant and (c_host, c_tenant) not in wd_candidates:
+                                        wd_candidates.append((c_host, c_tenant))
+            except Exception as e:
+                logger.debug(f"Failed to load sources.json: {e}")
 
-                subdomains = [
-                    f"{slug}.myworkdayjobs.com",
-                    f"{slug}.wd1.myworkdayjobs.com",
-                    f"{slug}.wd3.myworkdayjobs.com",
-                    f"{slug}.wd5.myworkdayjobs.com",
-                    f"{slug}.wd9.myworkdayjobs.com",
-                    f"{slug}.wd12.myworkdayjobs.com"
-                ]
-                tenants = ["external", "External", "External_Career_Site", "external_careers", "external_experienced", "external_university", "experienced", "university", "external_experienced_careers", "external_global"]
-                for sd in subdomains:
-                    for t in tenants:
-                        if (sd, t) not in wd_candidates:
-                            wd_candidates.append((sd, t))
+            subdomains = [
+                f"{slug}.myworkdayjobs.com",
+                f"{slug}.wd1.myworkdayjobs.com",
+                f"{slug}.wd3.myworkdayjobs.com",
+                f"{slug}.wd5.myworkdayjobs.com",
+                f"{slug}.wd9.myworkdayjobs.com",
+                f"{slug}.wd12.myworkdayjobs.com"
+            ]
+            if host and host not in subdomains:
+                subdomains.insert(0, host)
+
+            tenants = ["external", "External", "External_Career_Site", "external_careers", "external_experienced", "external_university", "experienced", "university", "external_experienced_careers", "external_global"]
+            if tenant and tenant not in tenants:
+                tenants.insert(0, tenant)
+
+            for sd in subdomains:
+                for t in tenants:
+                    if (sd, t) not in wd_candidates:
+                        wd_candidates.append((sd, t))
 
             def probe_workday(cand_host: str, cand_tenant: str) -> Optional[dict]:
                 headers = {
@@ -519,6 +524,7 @@ def verify_discovered_source(
             
             success_result = None
             blocked_result = None
+            first_zero_result = None
             
             with ThreadPoolExecutor(max_workers=8) as executor:
                 futures = {executor.submit(probe_workday, h, t): (h, t) for h, t in wd_candidates}
@@ -527,12 +533,16 @@ def verify_discovered_source(
                     if res:
                         if res.get("blocked"):
                             blocked_result = res
-                        elif not is_speculative or res["jobs_count"] > 0:
+                        elif (res.get("total") is not None and res.get("total") > 0) or res.get("jobs_count", 0) > 0:
                             success_result = res
-                            # Cancel remaining pending futures
                             for f in futures:
                                 f.cancel()
                             break
+                        elif not first_zero_result:
+                            first_zero_result = res
+
+            if not success_result and first_zero_result:
+                success_result = first_zero_result
 
             if success_result:
                 endpoint_reachable = True
@@ -711,11 +721,13 @@ def verify_discovered_source(
     addable = False
 
     if endpoint_reachable and valid_schema:
-        if jobs_found > 0:
+        has_positive_jobs = (jobs_available is not None and jobs_available > 0) or (jobs_found is not None and jobs_found > 0)
+        if has_positive_jobs:
             verified = True
             addable = True
             verification_status = f"verified_{access_strategy}" if access_strategy in ("api", "html", "browser") else "verified"
-            verification_reason = f"Source verified via {access_strategy.upper()} with {jobs_found} jobs."
+            display_count = jobs_available if jobs_available is not None else jobs_found
+            verification_reason = f"Source verified via {access_strategy.upper()} with {display_count} jobs."
         else:
             verified = False
             addable = False

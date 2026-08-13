@@ -4,7 +4,20 @@ from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# Credentials configuration
+# Credentials configuration — read at call time so .env changes take effect after restart
+def _credentials_file():
+    return os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json")
+
+def _token_file():
+    return os.getenv("GOOGLE_TOKEN_FILE", "token.json")
+
+def _spreadsheet_id():
+    # Check module-level override first (allows tests to monkeypatch GOOGLE_SHEETS_SPREADSHEET_ID directly)
+    if GOOGLE_SHEETS_SPREADSHEET_ID:
+        return GOOGLE_SHEETS_SPREADSHEET_ID
+    return os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
+
+# Keep module-level names for backward compatibility (read at import; will be correct if load_dotenv() called first)
 GOOGLE_CREDENTIALS_FILE = os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json")
 GOOGLE_TOKEN_FILE = os.getenv("GOOGLE_TOKEN_FILE", "token.json")
 GOOGLE_DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
@@ -15,7 +28,9 @@ _sheets_service = None
 
 def get_google_credentials():
     """Attempts to build Google OAuth2 user credentials from credentials.json and token.json."""
-    if not os.path.exists(GOOGLE_CREDENTIALS_FILE) and not os.path.exists(GOOGLE_TOKEN_FILE):
+    creds_file = _credentials_file()
+    token_file = _token_file()
+    if not os.path.exists(creds_file) and not os.path.exists(token_file):
         return None
 
     try:
@@ -28,16 +43,18 @@ def get_google_credentials():
         ]
         
         creds = None
-        if os.path.exists(GOOGLE_TOKEN_FILE):
-            creds = Credentials.from_authorized_user_file(GOOGLE_TOKEN_FILE, SCOPES)
+        if os.path.exists(token_file):
+            creds = Credentials.from_authorized_user_file(token_file, SCOPES)
             
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
-            elif os.path.exists(GOOGLE_CREDENTIALS_FILE):
-                flow = InstalledAppFlow.from_client_secrets_file(GOOGLE_CREDENTIALS_FILE, SCOPES)
+                with open(token_file, 'w') as tf:
+                    tf.write(creds.to_json())
+            elif os.path.exists(creds_file):
+                flow = InstalledAppFlow.from_client_secrets_file(creds_file, SCOPES)
                 creds = flow.run_local_server(port=0)
-                with open(GOOGLE_TOKEN_FILE, 'w') as token:
+                with open(token_file, 'w') as token:
                     token.write(creds.to_json())
                     
         return creds
@@ -113,7 +130,8 @@ def sync_jobs_to_sheet(selected_jobs: List[Dict[str, Any]]) -> bool:
     Syncs selected jobs to Google Spreadsheet by appending new jobs and updating existing rows.
     Preserves historical rows across runs.
     """
-    if not ensure_sheets_service() or not GOOGLE_SHEETS_SPREADSHEET_ID:
+    spreadsheet_id = _spreadsheet_id()
+    if not ensure_sheets_service() or not spreadsheet_id:
         logger.info("Google Sheets API service or SPREADSHEET_ID unconfigured. Skipping sheet sync.")
         return False
 
@@ -123,7 +141,7 @@ def sync_jobs_to_sheet(selected_jobs: List[Dict[str, Any]]) -> bool:
         # Read existing rows from Sheet1!A:Q
         try:
             read_res = _sheets_service.spreadsheets().values().get(
-                spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+                spreadsheetId=spreadsheet_id,
                 range='Sheet1!A:Q'
             ).execute()
             existing_values = read_res.get('values', [])
@@ -133,7 +151,7 @@ def sync_jobs_to_sheet(selected_jobs: List[Dict[str, Any]]) -> bool:
         # If sheet is totally empty, insert header row
         if not existing_values:
             _sheets_service.spreadsheets().values().update(
-                spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+                spreadsheetId=spreadsheet_id,
                 range='Sheet1!A1',
                 valueInputOption='USER_ENTERED',
                 body={'values': [SHEET_HEADERS]}
@@ -163,7 +181,7 @@ def sync_jobs_to_sheet(selected_jobs: List[Dict[str, Any]]) -> bool:
             if row_number:
                 # Update existing row in-place
                 _sheets_service.spreadsheets().values().update(
-                    spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+                    spreadsheetId=spreadsheet_id,
                     range=f'Sheet1!A{row_number}:Q{row_number}',
                     valueInputOption='USER_ENTERED',
                     body={'values': [row_data]}
@@ -171,7 +189,7 @@ def sync_jobs_to_sheet(selected_jobs: List[Dict[str, Any]]) -> bool:
             else:
                 # Append new row
                 _sheets_service.spreadsheets().values().append(
-                    spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+                    spreadsheetId=spreadsheet_id,
                     range='Sheet1!A1',
                     valueInputOption='USER_ENTERED',
                     insertDataOption='INSERT_ROWS',
@@ -190,12 +208,13 @@ def sync_jobs_to_sheet(selected_jobs: List[Dict[str, Any]]) -> bool:
 
 def _find_job_row_number(job: Dict[str, Any]) -> Optional[int]:
     """Finds the 1-indexed row number of a job in Google Sheets."""
-    if not ensure_sheets_service() or not GOOGLE_SHEETS_SPREADSHEET_ID:
+    spreadsheet_id = _spreadsheet_id()
+    if not ensure_sheets_service() or not spreadsheet_id:
         return None
 
     try:
         read_res = _sheets_service.spreadsheets().values().get(
-            spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+            spreadsheetId=spreadsheet_id,
             range='Sheet1!A:Q'
         ).execute()
         existing_values = read_res.get('values', [])
@@ -224,10 +243,11 @@ def update_job_status_in_sheet(job: Dict[str, Any]) -> bool:
     try:
         status_val = job.get("status", "selected")
         applied_at_val = str(job.get("applied_at", ""))[:10] if job.get("applied_at") else ""
+        spreadsheet_id = _spreadsheet_id()
         
         # Col O is Status (15th col), Col Q is Date Applied (17th col)
         _sheets_service.spreadsheets().values().update(
-            spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+            spreadsheetId=spreadsheet_id,
             range=f'Sheet1!O{row_num}',
             valueInputOption='USER_ENTERED',
             body={'values': [[status_val]]}
@@ -235,7 +255,7 @@ def update_job_status_in_sheet(job: Dict[str, Any]) -> bool:
 
         if applied_at_val:
             _sheets_service.spreadsheets().values().update(
-                spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+                spreadsheetId=spreadsheet_id,
                 range=f'Sheet1!Q{row_num}',
                 valueInputOption='USER_ENTERED',
                 body={'values': [[applied_at_val]]}
@@ -256,7 +276,7 @@ def update_job_resume_url_in_sheet(job: Dict[str, Any], overleaf_url: str) -> bo
     try:
         # Col N is Resume URL (14th col)
         _sheets_service.spreadsheets().values().update(
-            spreadsheetId=GOOGLE_SHEETS_SPREADSHEET_ID,
+            spreadsheetId=_spreadsheet_id(),
             range=f'Sheet1!N{row_num}',
             valueInputOption='USER_ENTERED',
             body={'values': [[overleaf_url]]}

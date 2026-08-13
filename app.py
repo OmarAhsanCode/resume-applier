@@ -1,6 +1,8 @@
 import os
 import threading
 import logging
+from dotenv import load_dotenv
+load_dotenv()  # Must be first - loads .env before any module-level os.getenv() calls
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
 import database
 import resume

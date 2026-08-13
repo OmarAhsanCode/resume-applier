@@ -521,5 +521,90 @@ class TestWatchlistVerify(unittest.TestCase):
         self.assertFalse(res["verified"])
         self.assertEqual(res["verification_status"], "access_restricted")
 
+    def test_adobe_workday_jobs_available_790_preserved(self):
+        companies_data = [
+            {
+                "company": "Adobe India",
+                "careers_url": "https://www.adobe.com/careers.html",
+                "source": "workday",
+                "source_identifier": "adobe",
+                "enabled": True,
+                "verified": False,
+                "verification_status": "no_jobs_found",
+                "jobs_found": 0,
+                "jobs_available": 790,
+                "jobs_retrieved": 20,
+                "last_verified": "2026-08-13 22:00:00",
+                "ats_host": "adobe.wd5.myworkdayjobs.com",
+                "ats_tenant": "external_experienced",
+                "access_strategy": "api"
+            }
+        ]
+        self.write_companies(companies_data)
+        loaded = company_manager.load_companies(self.companies_path)
+        adobe = next(c for c in loaded if c["company"] == "Adobe India")
+        
+        self.assertTrue(adobe["verified"])
+        self.assertEqual(adobe["verification_status"], "verified_api")
+        self.assertEqual(adobe["jobs_available"], 790)
+
+    @patch("company_discovery.requests.post")
+    def test_jobs_found_zero_cannot_override_positive_jobs_available(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "total": 790,
+            "jobPostings": [{"title": f"Job {i}", "externalPath": f"/job{i}"} for i in range(20)]
+        }
+        mock_post.return_value = mock_response
+
+        cand = {
+            "company_name": "Adobe India",
+            "ats_platform": "workday",
+            "ats_host": "adobe.wd5.myworkdayjobs.com",
+            "ats_tenant": "external_experienced",
+            "careers_url": "https://www.adobe.com/careers.html"
+        }
+        res = company_discovery.verify_discovered_source(cand)
+        self.assertTrue(res["verified"])
+        self.assertEqual(res["verification_status"], "verified_api")
+        self.assertEqual(res["jobs_available"], 790)
+        self.assertEqual(res["jobs_retrieved"], 20)
+
+    def test_salesforce_nvidia_behavior_unchanged(self):
+        companies_data = [
+            {
+                "company": "NVIDIA India",
+                "source": "workday",
+                "enabled": True,
+                "verified": True,
+                "verification_status": "verified_api",
+                "jobs_found": 20,
+                "jobs_available": 2000,
+                "jobs_retrieved": 20,
+                "last_verified": "2026-08-13 22:00:00"
+            },
+            {
+                "company": "Salesforce India",
+                "source": "workday",
+                "enabled": True,
+                "verified": True,
+                "verification_status": "verified_api",
+                "jobs_found": 20,
+                "jobs_available": 1521,
+                "jobs_retrieved": 20,
+                "last_verified": "2026-08-13 22:00:00"
+            }
+        ]
+        self.write_companies(companies_data)
+        loaded = company_manager.load_companies(self.companies_path)
+        nvidia = next(c for c in loaded if c["company"] == "NVIDIA India")
+        salesforce = next(c for c in loaded if c["company"] == "Salesforce India")
+        
+        self.assertEqual(nvidia["jobs_available"], 2000)
+        self.assertEqual(nvidia["verification_status"], "verified_api")
+        self.assertEqual(salesforce["jobs_available"], 1521)
+        self.assertEqual(salesforce["verification_status"], "verified_api")
+
 if __name__ == "__main__":
     unittest.main()

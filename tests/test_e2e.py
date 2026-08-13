@@ -121,11 +121,14 @@ class TestEndToEnd(unittest.TestCase):
         updated_job = database.get_job_by_id(top_job["id"], db_path=self.db_path)
         self.assertEqual(updated_job["status"], "applied")
 
-        # 4. Simulate Pipeline Run 2 (Deduplication Check)
+        # 4. Simulate Pipeline Run 2 (Previously-seen jobs eligible, not permanently excluded)
         res2 = jobs.run_job_search_pipeline(requested_jobs=5, db_path=self.db_path)
         self.assertEqual(res2["status"], "completed")
         self.assertEqual(res2["discovered_count"], 3)
-        self.assertEqual(res2["duplicate_count"], 3) # All 3 jobs deduplicated!
+        # All 3 jobs already exist in DB — they are re-discoveries (cross-run), NOT within-run duplicates
+        self.assertEqual(res2["duplicate_count"], 0)
+        # Previously-seen eligible jobs should fill the pool → selected_count > 0
+        self.assertGreater(res2["selected_count"], 0)
 
 if __name__ == "__main__":
     unittest.main()

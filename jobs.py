@@ -380,11 +380,17 @@ def run_job_search_pipeline(
         if stop_checker and stop_checker():
             return handle_stop()
 
-        # Step 3: Deduplication & Hard Filtering
+        # Step 3: In-run deduplication (same unique_id seen multiple times in this discovery run)
+        # and separation of genuinely new vs previously-seen jobs.
         report_progress("Deduplication & Filtering", "Checking job history and deduplicating...")
-        duplicate_count = 0
+        duplicate_count = 0         # true within-run duplicates (same unique_id twice)
         filtered_count = 0
-        valid_candidate_jobs = []
+        seen_in_this_run = set()    # tracks unique_ids within the current run only
+        new_candidate_jobs = []     # never seen before → highest priority
+        previously_seen_ids_updated = set()  # unique_ids whose last_seen was bumped
+
+        # Statuses that permanently exclude a job from re-appearing
+        EXCLUDED_STATUSES = {"applied", "rejected"}
 
         for job in discovered_jobs:
             if stop_checker and stop_checker():
@@ -392,35 +398,71 @@ def run_job_search_pipeline(
 
             job["run_id"] = run_id
             u_id = job["unique_id"]
-            if database.job_exists(u_id, db_path=db_path):
-                database.update_job_last_seen(u_id, db_path=db_path)
+
+            # True in-run duplicate: same unique_id already processed this run
+            if u_id in seen_in_this_run:
                 duplicate_count += 1
                 continue
+            seen_in_this_run.add(u_id)
 
-            # Hard filter check
+            if database.job_exists(u_id, db_path=db_path):
+                # Already in DB — bump last_seen but do NOT count as new
+                database.update_job_last_seen(u_id, db_path=db_path)
+                previously_seen_ids_updated.add(u_id)
+                # Duplicate counter tracks only within-run duplicates; this is a cross-run re-discovery
+                continue
+
+            # Hard filter check for new jobs only
             filtered, reason = is_hard_filtered(job, preferences, profile)
             if filtered:
                 filtered_count += 1
                 logger.debug(f"Filtered out job {job['title']} at {job['company']}: {reason}")
                 continue
 
-            # Compute deterministic score
+            # Compute deterministic score and save new job
             det_score = calculate_deterministic_score(profile, preferences, job)
             job["deterministic_score"] = det_score
-
-            # Save valid new job to SQLite
             job_id = database.save_job(job, db_path=db_path)
             job["id"] = job_id
-            valid_candidate_jobs.append(job)
+            new_candidate_jobs.append(job)
 
         report_progress(
             "Filtering",
-            f"Deduplicated {duplicate_count} jobs. Filtered {filtered_count} obvious mismatches. {len(valid_candidate_jobs)} new candidates remaining.",
+            f"Within-run duplicates: {duplicate_count}. Hard-filtered: {filtered_count}. "
+            f"New jobs: {len(new_candidate_jobs)}. Previously-seen refreshed: {len(previously_seen_ids_updated)}.",
             {"duplicate_count": duplicate_count, "filtered_count": filtered_count}
         )
 
+        # Build the full scored candidate pool:
+        # Priority 1: brand-new jobs (sorted by deterministic_score desc)
+        new_candidate_jobs.sort(key=lambda j: j["deterministic_score"], reverse=True)
+
+        # Priority 2: previously-seen eligible jobs if we need to fill the requested count
+        # (excludes applied/rejected via get_previously_shown_jobs)
+        previously_seen_pool = []
+        if len(new_candidate_jobs) < requested_jobs:
+            needed = requested_jobs - len(new_candidate_jobs)
+            # Fetch previously-seen eligible jobs, ordered by least-recently-shown first
+            prev_jobs = database.get_previously_shown_jobs(
+                excluded_statuses=list(EXCLUDED_STATUSES),
+                limit=needed + 50,  # fetch a little extra to allow filtering
+                db_path=db_path
+            )
+            new_ids = {j["unique_id"] for j in new_candidate_jobs}
+            for pj in prev_jobs:
+                if pj["unique_id"] in new_ids:
+                    continue
+                # Re-apply hard filter in case preferences changed
+                filtered, _ = is_hard_filtered(pj, preferences, profile)
+                if not filtered:
+                    previously_seen_pool.append(pj)
+                if len(previously_seen_pool) >= needed:
+                    break
+
+        valid_candidate_jobs = new_candidate_jobs + previously_seen_pool
+
         if not valid_candidate_jobs:
-            msg = "No new matching jobs discovered."
+            msg = "No eligible jobs found (new or previously seen)."
             database.update_run_progress(run_id, status="completed", selected_count=0, db_path=db_path)
             return {
                 "status": "completed",
@@ -438,8 +480,8 @@ def run_job_search_pipeline(
         if stop_checker and stop_checker():
             return handle_stop()
 
-        # Step 4: Sort by deterministic score and pick top pool for AI analysis
-        valid_candidate_jobs.sort(key=lambda j: j["deterministic_score"], reverse=True)
+        # Step 4: Sort by deterministic score and pick top pool for AI analysis.
+        # New jobs are already first in the list; within each group sort by score.
         ai_pool_size = min(len(valid_candidate_jobs), max(requested_jobs * 2, 5))
         ai_candidate_pool = valid_candidate_jobs[:ai_pool_size]
 
@@ -455,17 +497,18 @@ def run_job_search_pipeline(
             report_progress("AI Analysis", f"Analyzing job {idx}/{len(ai_candidate_pool)}: {job['title']} at {job['company']}")
             try:
                 analysis = ai.analyze_job(profile, job)
-                ai_score = float(analysis.get("score", job["deterministic_score"]))
+                ai_score = float(analysis.get("score", job.get("deterministic_score") or job.get("final_score") or 50))
 
                 # Final Score Formula: 60% Deterministic + 40% AI
-                final_score = round((job["deterministic_score"] * 0.60) + (ai_score * 0.40), 1)
+                det = job.get("deterministic_score") or job.get("final_score") or 50
+                final_score = round((det * 0.60) + (ai_score * 0.40), 1)
 
                 job["ai_score"] = ai_score
                 job["final_score"] = final_score
                 job["ai_analysis"] = analysis
                 database.update_job_evaluation(
                     job_id=job["id"],
-                    deterministic_score=job["deterministic_score"],
+                    deterministic_score=job.get("deterministic_score"),
                     ai_score=ai_score,
                     final_score=final_score,
                     ai_analysis=analysis,
@@ -490,6 +533,9 @@ def run_job_search_pipeline(
 
         for s_job in selected_jobs:
             database.update_job_status(s_job["id"], "selected", db_path=db_path)
+
+        # Mark these jobs as shown so future runs deprioritize them correctly
+        database.mark_jobs_shown([j["id"] for j in selected_jobs], db_path=db_path)
 
         report_progress("Selection", f"Selected top {selected_count} jobs.", {"selected_count": selected_count})
 

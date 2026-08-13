@@ -62,6 +62,15 @@ def load_companies(config_path: str = COMPANIES_CONFIG_PATH) -> List[Dict[str, A
                         if "verification_status" not in item:
                             item["verification_status"] = "verified" if item.get("verified") else "verification_failed"
                             migrated = True
+                        if item.get("jobs_available") is not None and item["jobs_available"] > 0:
+                            if item.get("verification_status") == "no_jobs_found":
+                                strat = item.get("access_strategy") or "api"
+                                item["verification_status"] = f"verified_{strat}"
+                                item["verified"] = True
+                                migrated = True
+                            if item.get("jobs_found") == 0:
+                                item["jobs_found"] = item["jobs_available"]
+                                migrated = True
                 
                 if migrated:
                     try:
@@ -278,7 +287,7 @@ def verify_company_config(
     companies = load_companies(companies_path)
     target_comp = None
     for item in companies:
-        if item.get("company", "").strip().lower() == company_name.strip().lower():
+        if (item.get("company") or "").strip().lower() == (company_name or "").strip().lower():
             target_comp = item
             break
 
@@ -305,13 +314,18 @@ def verify_company_config(
     target_comp["last_verified"] = verified_res.get("last_verified")
     
     jobs_f = verified_res.get("jobs_found")
-    target_comp["jobs_found"] = int(jobs_f) if jobs_f is not None else None
-    
     jobs_av = verified_res.get("jobs_available")
-    target_comp["jobs_available"] = int(jobs_av) if jobs_av is not None else None
-    
     jobs_re = verified_res.get("jobs_retrieved")
-    target_comp["jobs_retrieved"] = int(jobs_re) if jobs_re is not None else None
+    
+    target_comp["jobs_available"] = int(jobs_av) if jobs_av is not None else (int(jobs_f) if jobs_f is not None else None)
+    target_comp["jobs_retrieved"] = int(jobs_re) if jobs_re is not None else (int(jobs_f) if jobs_f is not None else None)
+    target_comp["jobs_found"] = target_comp["jobs_available"] if target_comp["jobs_available"] is not None else (int(jobs_f) if jobs_f is not None else None)
+    
+    if target_comp["jobs_available"] is not None and target_comp["jobs_available"] > 0:
+        target_comp["verified"] = True
+        if target_comp.get("verification_status") in ("no_jobs_found", "verification_failed", "unverified"):
+            strat = target_comp.get("access_strategy") or verified_res.get("access_strategy") or "api"
+            target_comp["verification_status"] = f"verified_{strat}"
     
     if verified_res.get("ats_host"):
         target_comp["ats_host"] = verified_res["ats_host"]

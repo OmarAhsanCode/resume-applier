@@ -129,6 +129,8 @@
                         <strong>
                             {% if comp.verification_status == 'unverified' %}
                                 —
+                            {% elif comp.jobs_available is not none and comp.jobs_available > 0 %}
+                                {{ comp.jobs_available }}
                             {% elif comp.verification_status == 'no_jobs_found' %}
                                 0
                             {% elif comp.jobs_available is not none %}
@@ -142,7 +144,7 @@
                     </td>
                     <td>
                         {% if comp.enabled %}
-                            {% if comp.verification_status in ('verified', 'verified_api', 'verified_html', 'verified_browser') %}
+                            {% if comp.verification_status in ('verified', 'verified_api', 'verified_html', 'verified_browser') or (comp.jobs_available is not none and comp.jobs_available > 0) %}
                                 <span class="badge badge-success">✓ Active</span>
                             {% elif comp.verification_status == 'no_jobs_found' %}
                                 <span class="badge badge-warning">⚠ No Jobs</span>
@@ -227,7 +229,7 @@
         </div>
         <div class="modal-footer">
             <button onclick="closeClearDbModal()" class="btn btn-secondary">CANCEL</button>
-            <button onclick="confirmClearDb()" class="btn btn-danger">CLEAR DATABASE</button>
+            <button onclick="confirmClearDatabase()" class="btn btn-danger">CLEAR DATABASE</button>
         </div>
     </div>
 </div>
