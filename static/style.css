@@ -497,3 +497,92 @@ body {
 .flex-between { display: flex; justify-content: space-between; }
 .align-center { align-items: center; }
 .flex-gap { display: flex; gap: 0.5rem; }
+
+/* Company Watchlist ERP Styles */
+.watchlist-card {
+    margin-bottom: 1.2rem;
+    background: #ffffff;
+    border: 1px solid var(--border);
+    padding: 0.8rem 1rem;
+}
+.watchlist-header h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    letter-spacing: 0.03em;
+}
+.subtitle-sm {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin: 0.1rem 0 0.6rem 0;
+}
+.watchlist-form-box {
+    margin-bottom: 0.8rem;
+    background: #f9fafb;
+    padding: 0.5rem;
+    border: 1px solid #e5e7eb;
+}
+.form-input-long {
+    min-width: 320px;
+    flex-grow: 1;
+}
+.watchlist-table-container {
+    max-height: 280px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+}
+.watchlist-table th {
+    background: #f3f4f6;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    padding: 0.4rem 0.6rem;
+}
+.watchlist-table td {
+    font-size: 0.82rem;
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid #f3f4f6;
+}
+.priority-pill {
+    display: inline-block;
+    background: #e0e7ff;
+    color: #3730a3;
+    font-weight: 700;
+    padding: 0.1rem 0.4rem;
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 0.78rem;
+}
+.priority-pill:hover { background: #c7d2fe; }
+.badge-muted { background: #e5e7eb; color: #4b5563; }
+.btn-action-sm {
+    background: none;
+    border: 1px solid #d1d5db;
+    color: #374151;
+    font-size: 0.72rem;
+    padding: 0.1rem 0.35rem;
+    margin: 0 0.1rem;
+    cursor: pointer;
+    border-radius: 2px;
+}
+.btn-action-sm:hover { background: #f3f4f6; }
+.btn-action-danger { color: #dc2626; border-color: #fca5a5; }
+.btn-action-danger:hover { background: #fee2e2; }
+.link-muted-sm { font-size: 0.72rem; color: #6b7280; text-decoration: none; margin-left: 0.2rem; }
+.link-muted-sm:hover { text-decoration: underline; color: #2563eb; }
+
+.discovery-log-box {
+    background: #111827;
+    color: #34d399;
+    font-family: monospace;
+    font-size: 0.78rem;
+    padding: 0.6rem;
+    max-height: 180px;
+    overflow-y: auto;
+    border: 1px solid #374151;
+    margin-bottom: 0.5rem;
+}
+.modal-box-wide { max-width: 580px; }
+.detail-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.detail-table th { text-align: left; width: 35%; padding: 0.35rem; color: #4b5563; }
+.detail-table td { padding: 0.35rem; }
+.muted-sm { font-size: 0.75rem; color: #6b7280; }
+

@@ -8,18 +8,51 @@ from sources.base import create_normalized_job
 logger = logging.getLogger(__name__)
 
 def load_smartrecruiters_config() -> List[str]:
-    """Loads SmartRecruiters target configuration from config/sources.json or default fallback."""
+    """Loads active SmartRecruiters target configuration from config/sources.json filtered by watchlist."""
+    try:
+        import company_manager
+        companies = company_manager.load_companies()
+        
+        valid_statuses = ("verified", "verified_api", "verified_html", "verified_browser")
+        active_slugs = {
+            c.get("source_identifier", "").lower() for c in companies
+            if c.get("source") == "smartrecruiters"
+            and c.get("enabled", True)
+            and c.get("verification_status") in valid_statuses
+        }
+        
+        watchlist_slugs = {
+            c.get("source_identifier", "").lower() for c in companies
+            if c.get("source") == "smartrecruiters"
+        }
+    except Exception as e:
+        logger.debug(f"Error loading companies in load_smartrecruiters_config: {e}")
+        active_slugs = set()
+        watchlist_slugs = set()
+
     config_path = os.path.join("config", "sources.json")
+    targets = []
     if os.path.exists(config_path):
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if "smartrecruiters" in data and isinstance(data["smartrecruiters"], list):
-                    return data["smartrecruiters"]
+                    targets = data["smartrecruiters"]
         except Exception as e:
             logger.warning(f"Failed to load SmartRecruiters config from {config_path}: {e}")
             
-    return ["Square", "Visa", "Bosch", "Ubisoft"]
+    if not targets:
+        targets = ["Square", "Visa", "Bosch", "Ubisoft"]
+
+    res = []
+    for comp in targets:
+        slug = str(comp).lower()
+        if slug in watchlist_slugs:
+            if slug in active_slugs:
+                res.append(comp)
+        else:
+            res.append(comp)
+    return res
 
 def discover_jobs(search_config: Dict[str, Any] = None) -> List[Dict[str, Any]]:
     """

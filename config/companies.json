@@ -7,7 +7,13 @@
     "country": "India",
     "source": "greenhouse",
     "source_identifier": "razorpay",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   },
   {
     "company": "Postman",
@@ -17,7 +23,13 @@
     "country": "India",
     "source": "lever",
     "source_identifier": "postman",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   },
   {
     "company": "BrowserStack",
@@ -27,7 +39,13 @@
     "country": "India",
     "source": "greenhouse",
     "source_identifier": "browserstack",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   },
   {
     "company": "Freshworks",
@@ -37,7 +55,13 @@
     "country": "India",
     "source": "greenhouse",
     "source_identifier": "freshworks",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   },
   {
     "company": "Chargebee",
@@ -47,7 +71,13 @@
     "country": "India",
     "source": "greenhouse",
     "source_identifier": "chargebee",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   },
   {
     "company": "Swiggy",
@@ -57,7 +87,13 @@
     "country": "India",
     "source": "lever",
     "source_identifier": "swiggy",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   },
   {
     "company": "Zomato",
@@ -67,7 +103,13 @@
     "country": "India",
     "source": "lever",
     "source_identifier": "zomato",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   },
   {
     "company": "PhonePe",
@@ -77,7 +119,13 @@
     "country": "India",
     "source": "ashby",
     "source_identifier": "phonepe",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   },
   {
     "company": "CRED",
@@ -87,7 +135,13 @@
     "country": "India",
     "source": "greenhouse",
     "source_identifier": "cred",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   },
   {
     "company": "Atlassian India",
@@ -97,7 +151,13 @@
     "country": "India",
     "source": "greenhouse",
     "source_identifier": "atlassian",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   },
   {
     "company": "Uber India",
@@ -107,7 +167,13 @@
     "country": "India",
     "source": "greenhouse",
     "source_identifier": "uber",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   },
   {
     "company": "Adobe India",
@@ -117,7 +183,13 @@
     "country": "India",
     "source": "workday",
     "source_identifier": "adobe",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   },
   {
     "company": "NVIDIA India",
@@ -127,7 +199,13 @@
     "country": "India",
     "source": "workday",
     "source_identifier": "nvidia",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   },
   {
     "company": "Salesforce India",
@@ -137,7 +215,13 @@
     "country": "India",
     "source": "workday",
     "source_identifier": "salesforce",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   },
   {
     "company": "Google India",
@@ -145,7 +229,13 @@
     "category": "Global Tech (India Presence)",
     "priority": 100,
     "country": "India",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   },
   {
     "company": "Microsoft India",
@@ -153,6 +243,12 @@
     "category": "Global Tech (India Presence)",
     "priority": 100,
     "country": "India",
-    "enabled": true
+    "enabled": true,
+    "verified": false,
+    "verification_status": "unverified",
+    "jobs_found": null,
+    "last_verified": null,
+    "jobs_available": null,
+    "jobs_retrieved": null
   }
 ]

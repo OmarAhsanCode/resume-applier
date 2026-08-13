@@ -32,24 +32,6 @@
   ],
   "workday": [
     {
-      "company": "Adobe University",
-      "host": "adobe.wd5.myworkdayjobs.com",
-      "tenant": "external_university",
-      "company_slug": "adobe"
-    },
-    {
-      "company": "Adobe Experienced",
-      "host": "adobe.wd5.myworkdayjobs.com",
-      "tenant": "external_experienced",
-      "company_slug": "adobe"
-    },
-    {
-      "company": "Salesforce",
-      "host": "salesforce.wd12.myworkdayjobs.com",
-      "tenant": "External_Career_Site",
-      "company_slug": "salesforce"
-    },
-    {
       "company": "NVIDIA",
       "host": "nvidia.wd5.myworkdayjobs.com",
       "tenant": "NVIDIAExternalCareerSite",

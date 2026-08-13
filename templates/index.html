@@ -75,6 +75,104 @@
     </div>
 </div>
 
+<!-- Company Watchlist Section -->
+<div class="card watchlist-card">
+    <div class="watchlist-header">
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; flex-wrap: wrap; gap: 10px;">
+            <div>
+                <h3>COMPANY WATCHLIST</h3>
+                <p class="subtitle-sm">AI-Assisted Discovery • Deterministic ATS Verification • Targeted Search Priority</p>
+            </div>
+            <div>
+                <button type="button" onclick="verifyAllCompanies()" class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px; font-weight: bold; background: linear-gradient(135s, #4f46e5, #3b82f6); color: white; border: none; border-radius: 4px; cursor: pointer;">
+                    [ VERIFY ALL SOURCES ]
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="watchlist-form-box">
+        <div class="form-group inline-group">
+            <input type="text" id="add-company-name" placeholder="Enter company name (e.g. Zoho, Microsoft)..." class="form-input form-input-long" onkeydown="if(event.key==='Enter'){event.preventDefault();triggerCompanyDiscovery();}">
+            <button type="button" id="btn-add-company" onclick="triggerCompanyDiscovery()" class="btn btn-primary">
+                + ADD COMPANY
+            </button>
+        </div>
+    </div>
+
+    <div class="watchlist-table-container">
+        <table class="data-table watchlist-table">
+            <thead>
+                <tr>
+                    <th>Company</th>
+                    <th class="cell-center">Priority</th>
+                    <th>Source</th>
+                    <th class="cell-center">Available Jobs</th>
+                    <th>Status</th>
+                    <th class="cell-center">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="watchlist-tbody">
+                {% for comp in companies %}
+                <tr id="company-row-{{ comp.company|lower|replace(' ', '-') }}">
+                    <td>
+                        <strong>{{ comp.company }}</strong>
+                        {% if comp.careers_url %}
+                            <a href="{{ comp.careers_url }}" target="_blank" class="link-muted-sm">[Careers ↗]</a>
+                        {% endif %}
+                    </td>
+                    <td class="cell-center">
+                        <span class="priority-pill" data-company="{{ comp.company|escape }}" data-priority="{{ comp.priority }}" data-enabled="{% if comp.enabled %}true{% else %}false{% endif %}" onclick="openEditCompanyModalFromEl(this)">{{ comp.priority }}</span>
+                    </td>
+                    <td><span class="badge badge-info">{{ comp.source|capitalize }}</span></td>
+                    <td class="cell-center">
+                        <strong>
+                            {% if comp.verification_status == 'unverified' %}
+                                —
+                            {% elif comp.verification_status == 'no_jobs_found' %}
+                                0
+                            {% elif comp.jobs_available is not none %}
+                                {{ comp.jobs_available }}
+                            {% elif comp.jobs_retrieved is not none and comp.jobs_retrieved > 0 %}
+                                {{ comp.jobs_retrieved }} retrieved
+                            {% else %}
+                                —
+                            {% endif %}
+                        </strong>
+                    </td>
+                    <td>
+                        {% if comp.enabled %}
+                            {% if comp.verification_status in ('verified', 'verified_api', 'verified_html', 'verified_browser') %}
+                                <span class="badge badge-success">✓ Active</span>
+                            {% elif comp.verification_status == 'no_jobs_found' %}
+                                <span class="badge badge-warning">⚠ No Jobs</span>
+                            {% elif comp.verification_status == 'unverified' %}
+                                <span class="badge badge-warning">⚠ Not Verified</span>
+                            {% elif comp.verification_status == 'access_restricted' %}
+                                <span class="badge badge-danger">✗ Restricted</span>
+                            {% else %}
+                                <span class="badge badge-danger">✗ Failed</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="badge badge-muted">Disabled</span>
+                        {% endif %}
+                    </td>
+                    <td class="cell-center">
+                        <button data-company="{{ comp.company|escape }}" data-priority="{{ comp.priority }}" data-enabled="{% if comp.enabled %}true{% else %}false{% endif %}" onclick="openEditCompanyModalFromEl(this)" class="btn-action-sm">[Edit]</button>
+                        <button onclick="verifyCompany('{{ comp.company|escape }}')" class="btn-action-sm">[Verify]</button>
+                        <button onclick="openDeleteCompanyModal('{{ comp.company|escape }}')" class="btn-action-sm btn-action-danger">[Remove]</button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" class="cell-center muted">No preferred companies configured. Add a company above.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
 <!-- Run Status Panel -->
 <div id="run-status-panel" class="card status-panel-card">
     <h3>Run Status Panel</h3>
@@ -129,9 +227,141 @@
         </div>
         <div class="modal-footer">
             <button onclick="closeClearDbModal()" class="btn btn-secondary">CANCEL</button>
-            <button onclick="confirmClearDatabase()" class="btn btn-danger">CLEAR DATABASE</button>
+            <button onclick="confirmClearDb()" class="btn btn-danger">CLEAR DATABASE</button>
         </div>
     </div>
 </div>
 
+<!-- Company Discovery Progress Log Modal -->
+<div id="modal-company-progress" class="modal-overlay hidden">
+    <div class="modal-box modal-box-wide">
+        <div class="modal-header">
+            <h4>SEARCHING CAREER PORTAL...</h4>
+        </div>
+        <div class="modal-body">
+            <div id="company-discovery-logs" class="discovery-log-box">
+                <div>[DISCOVERY] Initializing company search...</div>
+            </div>
+            <p id="company-progress-status-text" class="muted-sm">AI assistant is identifying candidate ATS portal and Python is testing reachability...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Company Confirmation Modal -->
+<div id="modal-company-confirmation" class="modal-overlay hidden">
+    <div class="modal-box modal-box-wide">
+        <div class="modal-header">
+            <h4 id="conf-modal-title">DISCOVERY RESULT</h4>
+        </div>
+        <div class="modal-body">
+            <table class="detail-table">
+                <tr>
+                    <th>Company:</th>
+                    <td id="conf-company-name"><strong>-</strong></td>
+                </tr>
+                <tr>
+                    <th>Official Careers:</th>
+                    <td><a id="conf-careers-url" href="#" target="_blank">-</a></td>
+                </tr>
+                <tr>
+                    <th>Job Platform:</th>
+                    <td><span id="conf-ats-platform" class="badge badge-info">-</span></td>
+                </tr>
+                <tr>
+                    <th>Career Source Status:</th>
+                    <td><span id="conf-verification-status">-</span></td>
+                </tr>
+                <tr>
+                    <th>Verification Details:</th>
+                    <td><span id="conf-verification-reason" class="muted-sm">-</span></td>
+                </tr>
+                <tr>
+                    <th>Jobs Found:</th>
+                    <td><strong id="conf-jobs-found">0</strong></td>
+                </tr>
+                <tr>
+                    <th>Country:</th>
+                    <td id="conf-country">India</td>
+                </tr>
+                <tr>
+                    <th>Watchlist Priority (1-100):</th>
+                    <td>
+                        <input type="number" id="conf-priority" min="1" max="100" value="75" class="form-input form-input-short">
+                        <span class="muted-sm">(Affects search ranking boost, not hard filtering)</span>
+                    </td>
+                </tr>
+            </table>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeCompanyConfirmationModal()" class="btn btn-secondary">CANCEL</button>
+            <button onclick="retryCompanyDiscovery()" class="btn btn-secondary">↻ TRY DISCOVERY AGAIN</button>
+            <button id="btn-confirm-add-company" onclick="confirmAddCompany()" class="btn btn-primary">+ ADD COMPANY</button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Company Modal -->
+<div id="modal-edit-company" class="modal-overlay hidden">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h4>Edit Watchlist Company</h4>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="edit-company-name">
+            <div class="form-group">
+                <label>Company Name:</label>
+                <strong id="edit-display-name"></strong>
+            </div>
+            <div class="form-group">
+                <label for="edit-priority">Priority (1-100):</label>
+                <input type="number" id="edit-priority" min="1" max="100" value="75" class="form-input form-input-short">
+            </div>
+            <div class="form-group">
+                <label for="edit-enabled">Active State:</label>
+                <select id="edit-enabled" class="form-input">
+                    <option value="true">Active (Targeted Search)</option>
+                    <option value="false">Disabled (Skip Search)</option>
+                </select>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeEditCompanyModal()" class="btn btn-secondary">CANCEL</button>
+            <button onclick="confirmSaveEditCompany()" class="btn btn-primary">SAVE CHANGES</button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Company Modal -->
+<div id="modal-delete-company" class="modal-overlay hidden">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h4>Remove company from watchlist?</h4>
+        </div>
+        <div class="modal-body">
+            <p>Remove <strong id="delete-company-display-name"></strong> from your preferred companies?</p>
+            <p class="muted-sm">Note: Discovered historical jobs, resume files, and Google Sheets records will NOT be deleted.</p>
+            <input type="hidden" id="delete-company-name">
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeDeleteCompanyModal()" class="btn btn-secondary">CANCEL</button>
+            <button onclick="confirmRemoveCompany()" class="btn btn-danger">REMOVE</button>
+        </div>
+    </div>
+</div>
+
+<!-- Verify All Progress Modal -->
+<div id="modal-verify-all" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width: 600px; width: 90%;">
+        <div class="modal-header">
+            <h4>VERIFYING COMPANY SOURCES</h4>
+        </div>
+        <div class="modal-body">
+            <p id="verify-all-progress-text" style="font-weight: bold; margin-bottom: 10px;">[0/0] Initializing...</p>
+            <div style="background-color: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; font-family: monospace; font-size: 13px; max-height: 250px; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; text-align: left;" id="verify-all-log-box"></div>
+        </div>
+        <div class="modal-footer">
+            <button id="btn-close-verify-all" class="btn btn-secondary" onclick="closeVerifyAllModal()" disabled>CLOSE</button>
+        </div>
+    </div>
+</div>
 {% endblock %}

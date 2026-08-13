@@ -5,18 +5,51 @@ from sources.base import create_normalized_job
 
 logger = logging.getLogger(__name__)
 
-# Default target Greenhouse board tokens if none provided in search_config
 DEFAULT_GREENHOUSE_BOARDS = ["stripe", "figma", "github", "discord", "gitlab", "datadog", "canonical", "doordash"]
+
+def load_greenhouse_boards() -> List[str]:
+    """Loads active Greenhouse target boards from config files."""
+    try:
+        import company_manager
+        sources_cfg = company_manager.load_sources()
+        companies = company_manager.load_companies()
+        
+        valid_statuses = ("verified", "verified_api", "verified_html", "verified_browser")
+        active_slugs = {
+            c.get("source_identifier", "").lower() for c in companies
+            if c.get("source") == "greenhouse"
+            and c.get("enabled", True)
+            and c.get("verification_status") in valid_statuses
+        }
+        
+        watchlist_slugs = {
+            c.get("source_identifier", "").lower() for c in companies
+            if c.get("source") == "greenhouse"
+        }
+        
+        configured = sources_cfg.get("greenhouse", [])
+        if configured and isinstance(configured, list):
+            res = []
+            for b in configured:
+                slug = str(b).lower()
+                if slug in watchlist_slugs:
+                    if slug in active_slugs:
+                        res.append(slug)
+                else:
+                    res.append(slug)
+            return res
+    except Exception as e:
+        logger.debug(f"Error loading dynamic greenhouse boards: {e}")
+    return DEFAULT_GREENHOUSE_BOARDS
 
 def discover_jobs(search_config: Dict[str, Any] = None) -> List[Dict[str, Any]]:
     """
     Fetches job listings from Greenhouse public Job Board APIs.
     """
-    boards = DEFAULT_GREENHOUSE_BOARDS
+    boards = load_greenhouse_boards()
     if search_config and search_config.get("companies"):
         boards = [c.lower().replace(" ", "") for c in search_config["companies"]]
     
-    # Check if custom greenboard tokens specified in search_config
     if search_config and search_config.get("greenhouse_boards"):
         boards = search_config["greenhouse_boards"]
 

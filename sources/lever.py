@@ -7,11 +7,46 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LEVER_COMPANIES = ["palantir", "netflix", "spotify", "postman", "scaleai", "chime"]
 
+def load_lever_companies() -> List[str]:
+    """Loads active Lever targets from config files."""
+    try:
+        import company_manager
+        sources_cfg = company_manager.load_sources()
+        companies = company_manager.load_companies()
+        
+        valid_statuses = ("verified", "verified_api", "verified_html", "verified_browser")
+        active_slugs = {
+            c.get("source_identifier", "").lower() for c in companies
+            if c.get("source") == "lever"
+            and c.get("enabled", True)
+            and c.get("verification_status") in valid_statuses
+        }
+        
+        watchlist_slugs = {
+            c.get("source_identifier", "").lower() for c in companies
+            if c.get("source") == "lever"
+        }
+        
+        configured = sources_cfg.get("lever", [])
+        if configured and isinstance(configured, list):
+            res = []
+            for c in configured:
+                slug = str(c).lower()
+                if slug in watchlist_slugs:
+                    if slug in active_slugs:
+                        res.append(slug)
+                else:
+                    res.append(slug)
+            return res
+    except Exception as e:
+        logger.debug(f"Error loading dynamic lever targets: {e}")
+    return DEFAULT_LEVER_COMPANIES
+
 def discover_jobs(search_config: Dict[str, Any] = None) -> List[Dict[str, Any]]:
     """
     Fetches job listings from Lever public postings API.
     """
-    companies = DEFAULT_LEVER_COMPANIES
+    companies = load_lever_companies()
     if search_config and search_config.get("companies"):
         companies = [c.lower().replace(" ", "") for c in search_config["companies"]]
         

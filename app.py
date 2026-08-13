@@ -6,6 +6,9 @@ import database
 import resume
 import ai
 import jobs
+import company_manager
+import company_discovery
+import uuid
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -25,6 +28,10 @@ _active_run_thread = None
 _active_stop_requested = False
 _active_run_id = None
 _latest_progress = {"status": "idle", "stage": "Ready", "details": "No active run.", "logs": []}
+
+# In-memory async company discovery state
+_discovery_tasks_lock = threading.Lock()
+_discovery_tasks = {}
 
 def add_log_entry(msg: str):
     from datetime import datetime
@@ -46,6 +53,7 @@ def index():
     preferences = database.get_preferences()
     resume_settings = database.get_resume_settings()
     latest_run = database.get_latest_run()
+    companies = company_manager.load_companies()
     
     return render_template(
         "index.html",
@@ -53,6 +61,7 @@ def index():
         preferences=preferences,
         resume_settings=resume_settings,
         latest_run=latest_run,
+        companies=companies,
         current_progress=_latest_progress
     )
 
@@ -462,6 +471,248 @@ def sync_sheets():
             return jsonify({"status": "warning", "message": "Google Sheets sync skipped or unconfigured. Check SPREADSHEET_ID in .env."}), 400
     except Exception as e:
         logger.error(f"Manual Google Sheets sync error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# ---------------------------------------------------------------------------
+# Company Discovery & Watchlist Management Routes
+# ---------------------------------------------------------------------------
+
+@app.route("/companies", methods=["GET"])
+def get_companies():
+    """Returns all watchlist companies from config/companies.json."""
+    return jsonify(company_manager.load_companies())
+
+@app.route("/companies/discover", methods=["POST"])
+def start_company_discovery():
+    """Starts async discovery task for a company."""
+    data = request.get_json(silent=True) or request.form
+    company_name = (data.get("company_name") or data.get("company") or "").strip()
+    if not company_name:
+        return jsonify({"status": "error", "message": "Company name is required."}), 400
+
+    task_id = str(uuid.uuid4())
+    task_state = {
+        "status": "in_progress",
+        "company_name": company_name,
+        "logs": [f"Searching for official company source: {company_name}"],
+        "candidate": None,
+        "error": None
+    }
+
+    with _discovery_tasks_lock:
+        _discovery_tasks[task_id] = task_state
+
+    def run_async_discovery():
+        def task_progress(msg: str):
+            with _discovery_tasks_lock:
+                if task_id in _discovery_tasks:
+                    _discovery_tasks[task_id]["logs"].append(msg)
+
+        try:
+            candidate = company_discovery.discover_company(company_name, progress_callback=task_progress)
+            verified_result = company_discovery.verify_discovered_source(candidate, progress_callback=task_progress)
+            with _discovery_tasks_lock:
+                _discovery_tasks[task_id]["candidate"] = verified_result
+                _discovery_tasks[task_id]["status"] = "completed"
+        except Exception as e:
+            logger.error(f"Async company discovery error: {e}")
+            with _discovery_tasks_lock:
+                _discovery_tasks[task_id]["status"] = "failed"
+                _discovery_tasks[task_id]["error"] = str(e)
+                _discovery_tasks[task_id]["logs"].append(f"Discovery error: {e}")
+
+    thread = threading.Thread(target=run_async_discovery, daemon=True)
+    thread.start()
+
+    return jsonify({"status": "started", "task_id": task_id})
+
+@app.route("/companies/discover/status/<task_id>", methods=["GET"])
+def get_discovery_status(task_id: str):
+    """Returns status and logs of an async company discovery task."""
+    with _discovery_tasks_lock:
+        task_state = _discovery_tasks.get(task_id)
+        if not task_state:
+            return jsonify({"status": "error", "message": "Task not found."}), 404
+        return jsonify(task_state)
+
+@app.route("/companies/add", methods=["POST"])
+def add_company_route():
+    """Adds verified company configuration to companies.json and sources.json."""
+    data = request.get_json(silent=True) or request.form
+    if not data:
+        return jsonify({"status": "error", "message": "Invalid company payload."}), 400
+
+    try:
+        entry = company_manager.add_company_config(data)
+        return jsonify({"status": "success", "company": entry})
+    except Exception as e:
+        logger.error(f"Error adding company: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/companies/priority", methods=["POST"])
+def update_company_priority_route():
+    """Updates company priority (1-100). Accepts JSON body {'company': 'Name', 'priority': 85}."""
+    data = request.get_json(silent=True) or request.form
+    comp_name = data.get("company")
+    priority = data.get("priority")
+    if not comp_name or priority is None:
+        return jsonify({"status": "error", "message": "Company name and priority required."}), 400
+
+    try:
+        success = company_manager.update_company_priority(comp_name, priority)
+        if success:
+            return jsonify({"status": "success"})
+        return jsonify({"status": "error", "message": f"Company '{comp_name}' not found."}), 404
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/companies/toggle", methods=["POST"])
+def toggle_company_route():
+    """Toggles active/disabled state. Accepts JSON body {'company': 'Name', 'enabled': true/false}."""
+    data = request.get_json(silent=True) or request.form
+    comp_name = data.get("company")
+    enabled = data.get("enabled")
+    if not comp_name:
+        return jsonify({"status": "error", "message": "Company name required."}), 400
+
+    try:
+        success = company_manager.toggle_company_status(comp_name, enabled)
+        if success:
+            return jsonify({"status": "success"})
+        return jsonify({"status": "error", "message": f"Company '{comp_name}' not found."}), 404
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route("/companies/verify", methods=["POST"])
+def re_verify_company_route():
+    """Re-runs ATS verification. Accepts JSON body {'company': 'Name'}."""
+    data = request.get_json(silent=True) or request.form
+    comp_name = data.get("company")
+    if not comp_name:
+        return jsonify({"status": "error", "message": "Company name required."}), 400
+
+    try:
+        updated = company_manager.verify_company_config(comp_name)
+        return jsonify({"status": "success", "company": updated})
+    except Exception as e:
+        logger.error(f"Error re-verifying company: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+_verify_all_lock = threading.Lock()
+_verify_all_state = {
+    "status": "idle",
+    "current": 0,
+    "total": 0,
+    "current_company": "",
+    "logs": []
+}
+
+@app.route("/companies/verify-all", methods=["POST"])
+def verify_all_route():
+    """Starts async verification for all enabled companies in the watchlist."""
+    global _verify_all_state
+    
+    with _verify_all_lock:
+        if _verify_all_state["status"] == "in_progress":
+            return jsonify({"status": "error", "message": "Verification is already in progress."}), 400
+        
+        _verify_all_state = {
+            "status": "in_progress",
+            "current": 0,
+            "total": 0,
+            "current_company": "",
+            "logs": ["Starting batch verification of all enabled companies..."]
+        }
+
+    def run_async_verify_all():
+        global _verify_all_state
+        try:
+            companies = company_manager.load_companies()
+            enabled_companies = [c for c in companies if c.get("enabled", True)]
+            total = len(enabled_companies)
+            
+            with _verify_all_lock:
+                _verify_all_state["total"] = total
+                
+            if total == 0:
+                with _verify_all_lock:
+                    _verify_all_state["logs"].append("No enabled companies found in the watchlist.")
+                    _verify_all_state["status"] = "completed"
+                return
+
+            for idx, comp in enumerate(enabled_companies):
+                comp_name = comp.get("company", "Unknown")
+                
+                with _verify_all_lock:
+                    _verify_all_state["current"] = idx + 1
+                    _verify_all_state["current_company"] = comp_name
+                    _verify_all_state["logs"].append(f"[{idx + 1}/{total}] {comp_name}...")
+                
+                try:
+                    # Deterministic verification
+                    updated = company_manager.verify_company_config(comp_name)
+                    
+                    status = updated.get("verification_status", "verification_failed")
+                    source = (updated.get("source") or "source").capitalize()
+                    
+                    jobs_cnt = updated.get("jobs_available")
+                    if jobs_cnt is None:
+                        jobs_cnt = updated.get("jobs_found")
+                        
+                    if "verified" in status:
+                        if jobs_cnt is not None:
+                            log_msg = f"✓ {source} — {jobs_cnt} jobs"
+                        else:
+                            log_msg = f"✓ {source} — verified (jobs count unknown)"
+                    elif status == "no_jobs_found":
+                        log_msg = f"✓ {source} — 0 jobs"
+                    elif status == "access_restricted":
+                        log_msg = f"✗ Access Restricted (security challenge)"
+                    else:
+                        log_msg = f"✗ Verification failed"
+                        
+                except Exception as ex:
+                    logger.error(f"Error verifying {comp_name} during batch run: {ex}")
+                    log_msg = f"✗ Error: {ex}"
+                
+                with _verify_all_lock:
+                    _verify_all_state["logs"].append(log_msg)
+            
+            with _verify_all_lock:
+                _verify_all_state["logs"].append("Batch verification completed.")
+                _verify_all_state["status"] = "completed"
+                
+        except Exception as e:
+            logger.error(f"Async batch verification error: {e}")
+            with _verify_all_lock:
+                _verify_all_state["status"] = "failed"
+                _verify_all_state["logs"].append(f"Fatal error during batch verification: {e}")
+
+    thread = threading.Thread(target=run_async_verify_all, daemon=True)
+    thread.start()
+    
+    return jsonify({"status": "started"})
+
+@app.route("/companies/verify-all/status", methods=["GET"])
+def get_verify_all_status():
+    """Returns the current status of the batch verification task."""
+    with _verify_all_lock:
+        return jsonify(_verify_all_state)
+
+@app.route("/companies/delete", methods=["POST"])
+def delete_company_route():
+    """Removes company from config files. Accepts JSON body {'company': 'Name'}."""
+    data = request.get_json(silent=True) or request.form
+    comp_name = data.get("company")
+    if not comp_name:
+        return jsonify({"status": "error", "message": "Company name required."}), 400
+
+    try:
+        success = company_manager.remove_company_config(comp_name)
+        if success:
+            return jsonify({"status": "success"})
+        return jsonify({"status": "error", "message": f"Company '{comp_name}' not found."}), 404
+    except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":

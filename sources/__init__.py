@@ -25,6 +25,16 @@ def discover_targeted_sources(search_config: Optional[Dict[str, Any]] = None) ->
     targeted_jobs = []
     source_counts = {}
 
+    try:
+        import company_manager
+        company_priority_map = {
+            c["company"].strip().lower(): c.get("priority", 50)
+            for c in company_manager.load_companies()
+            if c.get("enabled", True)
+        }
+    except Exception:
+        company_priority_map = {}
+
     for source_entry in SOURCES:
         if source_entry.get("lane") != "targeted":
             continue
@@ -42,9 +52,12 @@ def discover_targeted_sources(search_config: Optional[Dict[str, Any]] = None) ->
 
         try:
             jobs = s_mod.discover_jobs(search_config)
-            # Ensure discovery_lane is tagged as targeted
+            # Ensure discovery_lane is tagged as targeted and attach company_priority
             for j in jobs:
                 j["discovery_lane"] = "targeted"
+                comp_clean = (j.get("company") or "").strip().lower()
+                if comp_clean in company_priority_map:
+                    j["company_priority"] = company_priority_map[comp_clean]
             targeted_jobs.extend(jobs)
             source_counts[s_name] = len(jobs)
             logger.info(f"Discovered {len(jobs)} jobs from {s_name.capitalize()}.")
