@@ -154,7 +154,8 @@ def preferences_route():
             min_sal_raw = request.form.get("minimum_salary", "").strip()
             min_salary = int(min_sal_raw) if min_sal_raw.isdigit() else None
             include_undisclosed = request.form.get("include_undisclosed_salary") in ["true", "on", "1"] or "include_undisclosed_salary" in request.form
-            
+            discovery_mode = request.form.get("discovery_mode", "targeted_and_open")
+
             pref_data = {
                 "preferred_roles": roles,
                 "locations": locations,
@@ -163,7 +164,8 @@ def preferences_route():
                 "jobs_per_run": jobs_per_run,
                 "dream_companies": dream_companies,
                 "minimum_salary": min_salary,
-                "include_undisclosed_salary": include_undisclosed
+                "include_undisclosed_salary": include_undisclosed,
+                "discovery_mode": discovery_mode
             }
             database.save_preferences(pref_data)
             flash("Job preferences updated successfully!", "success")
@@ -442,6 +444,28 @@ def download_resume(job_id):
         logger.error(f"Error downloading tex file: {e}")
         return "Error downloading resume file.", 500
 
+@app.route("/sync-sheets", methods=["POST"])
+def sync_sheets():
+    """Manually triggers Google Sheets synchronization for selected jobs."""
+    try:
+        import google_service
+        selected_jobs = database.get_all_jobs(status_filter="selected", limit=100)
+        if not selected_jobs:
+            selected_jobs = database.get_all_jobs(limit=50)
+            selected_jobs = [j for j in selected_jobs if j.get("status") != 'new']
+
+        google_service.initialize_google_sheets()
+        success = google_service.sync_jobs_to_sheet(selected_jobs)
+        if success:
+            return jsonify({"status": "success", "message": f"Successfully synced {len(selected_jobs)} jobs to Google Sheets."})
+        else:
+            return jsonify({"status": "warning", "message": "Google Sheets sync skipped or unconfigured. Check SPREADSHEET_ID in .env."}), 400
+    except Exception as e:
+        logger.error(f"Manual Google Sheets sync error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    debug_mode = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+    # use_reloader=False prevents watchdog from killing active background search threads mid-run
+    app.run(host="0.0.0.0", port=port, debug=debug_mode, use_reloader=False)

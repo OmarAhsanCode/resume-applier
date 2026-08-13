@@ -205,20 +205,42 @@ function openDetailsModal(jobId, company, title) {
     }
 
     let html = '';
-    if (data.reason) {
-        html += `<div style="margin-bottom: 12px;"><strong>AI Fit Analysis:</strong><p style="margin-top: 4px; color: #374151;">${escapeHtml(data.reason)}</p></div>`;
+
+    // SECTION 1: OBJECTIVE JOB FACTS
+    html += `<div style="border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; margin-bottom: 12px;">`;
+    html += `<h5 style="margin: 0 0 6px 0; color: #111827; font-size: 0.95rem; font-weight: 700;">📋 JOB INFORMATION</h5>`;
+
+    if (data.role_summary) {
+        html += `<div style="margin-bottom: 6px;"><strong>Role Summary:</strong> ${escapeHtml(data.role_summary)}</div>`;
     }
-    if (data.key_points && Array.isArray(data.key_points)) {
-        html += `<div style="margin-bottom: 12px;"><strong>Key Strengths & Role Points:</strong><ul style="margin-top: 4px; padding-left: 20px;">`;
+    if (data.key_technologies && Array.isArray(data.key_technologies) && data.key_technologies.length > 0) {
+        html += `<div style="margin-bottom: 6px;"><strong>Key Technologies:</strong> ${data.key_technologies.map(escapeHtml).join(', ')}</div>`;
+    }
+    if (data.key_points && Array.isArray(data.key_points) && data.key_points.length > 0) {
+        html += `<div style="margin-bottom: 6px;"><strong>Key Responsibilities & Highlights:</strong>`;
+        html += `<ul style="margin: 4px 0 0 0; padding-left: 20px;">`;
         data.key_points.forEach(pt => { html += `<li>${escapeHtml(pt)}</li>`; });
         html += `</ul></div>`;
     }
-    if (data.matching_requirements && Array.isArray(data.matching_requirements)) {
-        html += `<div style="margin-bottom: 8px;"><strong>Matching Qualifications:</strong> ${data.matching_requirements.map(escapeHtml).join(', ')}</div>`;
+    html += `</div>`;
+
+    // SECTION 2: CANDIDATE MATCH DETAILS
+    html += `<div>`;
+    html += `<h5 style="margin: 0 0 6px 0; color: #1d4ed8; font-size: 0.95rem; font-weight: 700;">🎯 CANDIDATE MATCH ANALYSIS</h5>`;
+
+    if (data.score) {
+        html += `<div style="margin-bottom: 6px;"><strong>AI Match Score:</strong> <span class="badge badge-info">${data.score} / 100</span> (${escapeHtml(data.recommendation || 'consider')})</div>`;
     }
-    if (data.missing_preferred_skills && Array.isArray(data.missing_preferred_skills)) {
-        html += `<div><strong>Missing Preferred Skills:</strong> ${data.missing_preferred_skills.map(escapeHtml).join(', ')}</div>`;
+    if (data.matching_requirements && Array.isArray(data.matching_requirements) && data.matching_requirements.length > 0) {
+        html += `<div style="margin-bottom: 6px;"><strong>Matching Skills:</strong> ${data.matching_requirements.map(escapeHtml).join(', ')}</div>`;
     }
+    if (data.missing_preferred_skills && Array.isArray(data.missing_preferred_skills) && data.missing_preferred_skills.length > 0) {
+        html += `<div style="margin-bottom: 6px;"><strong>Missing Preferred Skills:</strong> ${data.missing_preferred_skills.map(escapeHtml).join(', ')}</div>`;
+    }
+    if (data.reason) {
+        html += `<div style="margin-top: 6px;"><strong>Match Evaluation:</strong><p style="margin-top: 4px; color: #374151; font-size: 0.85rem;">${escapeHtml(data.reason)}</p></div>`;
+    }
+    html += `</div>`;
 
     modalBody.innerHTML = html || '<p>No additional details available.</p>';
     modal.classList.remove('hidden');
@@ -300,6 +322,20 @@ function showToast(message, type) {
     setTimeout(() => {
         toast.classList.remove('show');
     }, 3500);
+}
+
+function triggerSheetSync() {
+    showToast("Syncing jobs to Google Sheet...", "info");
+    fetch("/sync-sheets", { method: "POST" })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === "success") {
+                showToast(data.message, "success");
+            } else {
+                showToast(data.message || "Sync failed", "error");
+            }
+        })
+        .catch(err => showToast("Error syncing sheet: " + err, "error"));
 }
 
 function escapeHtml(str) {

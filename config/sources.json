@@ -74,6 +74,9 @@
     "app_id": "",
     "app_key": "",
     "country": "in",
-    "enabled": true
+    "enabled": true,
+    "max_queries": 10,
+    "max_pages_per_query": 2,
+    "results_per_page": 20
   }
 }

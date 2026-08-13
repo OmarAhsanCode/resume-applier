@@ -58,9 +58,19 @@
 
         <div class="form-row">
             <div class="form-group flex-1">
+                <label for="discovery_mode">Job Discovery Mode</label>
+                <select id="discovery_mode" name="discovery_mode" class="form-input">
+                    <option value="targeted_and_open" {% if not preferences or preferences.discovery_mode == 'targeted_and_open' %}selected{% endif %}>Target Companies + Open Discovery (Recommended)</option>
+                    <option value="targeted" {% if preferences and preferences.discovery_mode == 'targeted' %}selected{% endif %}>Target Companies Only</option>
+                    <option value="open_only" {% if preferences and preferences.discovery_mode == 'open_only' %}selected{% endif %}>Open Discovery Only (Adzuna)</option>
+                </select>
+            </div>
+
+            <div class="form-group flex-1">
                 <label for="jobs_per_run">Default Target Jobs Per Run</label>
                 <input type="number" id="jobs_per_run" name="jobs_per_run" value="{{ preferences.jobs_per_run if preferences else 50 }}" class="form-input">
             </div>
+        </div>
 
             <div class="form-group flex-1">
                 <label for="dream_companies">Dream / Preferred Companies (one per line)</label>

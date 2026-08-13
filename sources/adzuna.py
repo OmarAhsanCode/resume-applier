@@ -2,7 +2,7 @@ import os
 import json
 import logging
 import requests
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from sources.base import create_normalized_job
 
 logger = logging.getLogger(__name__)
@@ -13,6 +13,9 @@ def load_adzuna_config() -> Dict[str, Any]:
     app_key = os.getenv("ADZUNA_APP_KEY", "")
     country = os.getenv("ADZUNA_COUNTRY", "in")
     enabled = True
+    max_queries = 10
+    max_pages_per_query = 2
+    results_per_page = 20
 
     config_path = os.path.join("config", "sources.json")
     if os.path.exists(config_path):
@@ -26,6 +29,9 @@ def load_adzuna_config() -> Dict[str, Any]:
                     if not app_key:
                         app_key = cfg.get("app_key", "")
                     country = cfg.get("country", country)
+                    max_queries = cfg.get("max_queries", max_queries)
+                    max_pages_per_query = cfg.get("max_pages_per_query", max_pages_per_query)
+                    results_per_page = cfg.get("results_per_page", results_per_page)
                     if not (os.getenv("ADZUNA_APP_ID") and os.getenv("ADZUNA_APP_KEY")):
                         enabled = cfg.get("enabled", enabled)
                     else:
@@ -37,13 +43,16 @@ def load_adzuna_config() -> Dict[str, Any]:
         "app_id": app_id,
         "app_key": app_key,
         "country": country,
-        "enabled": enabled
+        "enabled": enabled,
+        "max_queries": max_queries,
+        "max_pages_per_query": max_pages_per_query,
+        "results_per_page": results_per_page
     }
 
-def discover_jobs(search_config: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+def fetch_single_query(query: str, page: int = 1, results_per_page: int = 20, search_config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """
-    Discovers jobs from Adzuna public job search API.
-    API: GET https://api.adzuna.com/v1/api/jobs/{country}/search/1?app_id=...&app_key=...
+    Fetches a single page of job search results from Adzuna for a specific query string.
+    Ensures V1.1.3 integrity guarantees (1:1 item mapping).
     """
     config = load_adzuna_config()
     app_id = config.get("app_id")
@@ -61,16 +70,12 @@ def discover_jobs(search_config: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         logger.info("Adzuna API app_id or app_key unconfigured. Skipping Adzuna job discovery.")
         return []
 
-    what_query = "software engineer intern"
-    if search_config and search_config.get("query"):
-        what_query = search_config["query"]
-
-    url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/1"
+    url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/{page}"
     params = {
         "app_id": app_id,
         "app_key": app_key,
-        "results_per_page": 20,
-        "what": what_query,
+        "results_per_page": results_per_page,
+        "what": query,
         "content-type": "application/json"
     }
 
@@ -108,12 +113,22 @@ def discover_jobs(search_config: Dict[str, Any] = None) -> List[Dict[str, Any]]:
                     application_url=redirect_url,
                     job_url=redirect_url,
                     apply_url=redirect_url,
-                    posted_date=created_at
+                    posted_date=created_at,
+                    discovery_lane="open"
                 )
                 normalized_jobs.append(norm_job)
         else:
-            logger.debug(f"Adzuna search returned HTTP {resp.status_code}")
+            logger.debug(f"Adzuna search returned HTTP {resp.status_code} for query '{query}'")
     except Exception as e:
-        logger.warning(f"Error fetching Adzuna jobs: {e}")
+        logger.warning(f"Error fetching Adzuna jobs for query '{query}': {e}")
 
     return normalized_jobs
+
+def discover_jobs(search_config: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+    """
+    Default single query discovery wrapper for backward compatibility.
+    """
+    what_query = "software engineer intern"
+    if search_config and search_config.get("query"):
+        what_query = search_config["query"]
+    return fetch_single_query(what_query, page=1, results_per_page=20, search_config=search_config)

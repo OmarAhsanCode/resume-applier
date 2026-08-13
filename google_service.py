@@ -94,7 +94,7 @@ def _build_job_row(idx: int, job: Dict[str, Any], base_url: str) -> List[Any]:
         job.get("company", ""),
         job.get("title", ""),
         job.get("location", ""),
-        job.get("employment_type", ""),
+        job.get("employment_type_display") or (job.get("employment_type", "").replace("_", " ").title()),
         job.get("deterministic_score", 0),
         job.get("ai_score", 0),
         job.get("final_score", 0),

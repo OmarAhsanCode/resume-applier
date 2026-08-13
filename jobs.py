@@ -346,20 +346,35 @@ def run_job_search_pipeline(
         if stop_checker and stop_checker():
             return handle_stop()
 
-        # Step 2: Job Discovery across sources
+        # Step 2: Job Discovery across sources (Targeted + Open Lanes)
         report_progress("Discovery", "Discovering jobs from registered sources...")
-        discovered_jobs = sources.discover_all_sources(preferences)
+        discovery_res = sources.discover_all_sources(
+            search_config=preferences,
+            progress_callback=report_progress,
+            stop_checker=stop_checker,
+            return_summary=True
+        )
+
+        if isinstance(discovery_res, tuple) and len(discovery_res) == 2:
+            discovered_jobs, discovery_summary = discovery_res
+        else:
+            discovered_jobs = discovery_res if isinstance(discovery_res, list) else []
+            discovery_summary = {
+                "mode": preferences.get("discovery_mode", "targeted_and_open"),
+                "targeted_counts": {},
+                "open_metrics": {}
+            }
+
         discovered_count = len(discovered_jobs)
 
-        source_counts = {}
-        for j in discovered_jobs:
-            s_name = j.get("source", "unknown")
-            source_counts[s_name] = source_counts.get(s_name, 0) + 1
+        source_counts = discovery_summary.get("targeted_counts", {})
+        if discovery_summary.get("open_metrics", {}).get("unique_count", 0) > 0:
+            source_counts["adzuna"] = discovery_summary["open_metrics"]["unique_count"]
 
         report_progress(
             "Discovery",
-            f"Discovered {discovered_count} job postings across sources: {source_counts}",
-            {"discovered_count": discovered_count, "source_counts": source_counts}
+            f"Discovered {discovered_count} job postings across discovery lanes.",
+            {"discovered_count": discovered_count, "source_counts": source_counts, "discovery_summary": discovery_summary}
         )
 
         if stop_checker and stop_checker():

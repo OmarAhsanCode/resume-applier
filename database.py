@@ -1,4 +1,5 @@
 import os
+import re
 import sqlite3
 import json
 from datetime import datetime
@@ -86,9 +87,34 @@ def init_db(db_path: str = None) -> None:
     );
     """)
 
-    # Migration: Add run_id column if table was created previously without run_id
+    # Migration: Add run_id and discovery_lane columns if table was created previously without them
     try:
         cursor.execute("ALTER TABLE jobs ADD COLUMN run_id INTEGER;")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN discovery_lane TEXT DEFAULT 'targeted';")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN raw_employment_type TEXT;")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN salary_evidence TEXT DEFAULT 'unknown';")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN salary_text TEXT DEFAULT 'Not disclosed';")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN normalized_salary TEXT DEFAULT 'Not disclosed';")
     except sqlite3.OperationalError:
         pass
 
@@ -178,7 +204,10 @@ def get_preferences(db_path: str = None) -> Optional[Dict[str, Any]]:
     conn.close()
     if not row:
         return None
-    return json.loads(row["preferences_json"])
+    data = json.loads(row["preferences_json"])
+    if isinstance(data, dict):
+        data.setdefault("discovery_mode", "targeted_and_open")
+    return data
 
 # ---------------------------------------------------------------------------
 # Resume Settings Helper Functions
@@ -255,17 +284,27 @@ def save_job(job_data: Dict[str, Any], db_path: str = None) -> int:
             title = COALESCE(?, title),
             location = COALESCE(?, location),
             employment_type = COALESCE(?, employment_type),
+            raw_employment_type = COALESCE(?, raw_employment_type),
             description = COALESCE(?, description),
             application_url = COALESCE(?, application_url),
             posted_date = COALESCE(?, posted_date),
+            discovery_lane = COALESCE(?, discovery_lane),
+            salary_evidence = COALESCE(?, salary_evidence),
+            salary_text = COALESCE(?, salary_text),
+            normalized_salary = COALESCE(?, normalized_salary),
             last_seen = ?,
             updated_at = ?
         WHERE unique_id = ?
         """, (
             job_data.get("run_id"),
             job_data.get("company"), job_data.get("title"), job_data.get("location"),
-            job_data.get("employment_type"), job_data.get("description"), job_data.get("application_url"),
-            job_data.get("posted_date"), now, now, unique_id
+            job_data.get("employment_type"), job_data.get("raw_employment_type"),
+            job_data.get("description"), job_data.get("application_url"),
+            job_data.get("posted_date"), job_data.get("discovery_lane", "targeted"),
+            job_data.get("salary_evidence", "unknown"),
+            job_data.get("salary_text", "Not disclosed"),
+            job_data.get("normalized_salary", "Not disclosed"),
+            now, now, unique_id
         ))
         conn.commit()
         conn.close()
@@ -275,10 +314,11 @@ def save_job(job_data: Dict[str, Any], db_path: str = None) -> int:
     cursor.execute("""
     INSERT INTO jobs (
         run_id, source, source_job_id, unique_id, company, title, location, employment_type,
-        description, application_url, posted_date, first_seen, last_seen, status,
+        raw_employment_type, description, application_url, posted_date, discovery_lane,
+        salary_evidence, salary_text, normalized_salary, first_seen, last_seen, status,
         deterministic_score, ai_score, final_score, ai_analysis, resume_json,
         resume_tex_path, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         job_data.get("run_id"),
         job_data.get("source"),
@@ -288,9 +328,14 @@ def save_job(job_data: Dict[str, Any], db_path: str = None) -> int:
         job_data.get("title"),
         job_data.get("location"),
         job_data.get("employment_type"),
+        job_data.get("raw_employment_type"),
         job_data.get("description"),
         job_data.get("application_url"),
         job_data.get("posted_date"),
+        job_data.get("discovery_lane", "targeted"),
+        job_data.get("salary_evidence", "unknown"),
+        job_data.get("salary_text", "Not disclosed"),
+        job_data.get("normalized_salary", "Not disclosed"),
         now, now,
         job_data.get("deterministic_score"),
         job_data.get("ai_score"),
@@ -374,6 +419,76 @@ def update_job_status(job_id: int, status: str, db_path: str = None) -> None:
     conn.commit()
     conn.close()
 
+def _hydrate_job_record(d: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Hydrates and re-normalizes a job dictionary loaded from SQLite:
+    1. Re-evaluates employment type through canonical evidence hierarchy (base.py)
+    2. Computes canonical employment_type_display string ('Internship', 'Full-time', etc.)
+    3. Re-hydrates salary_text / normalized_salary from description if unpopulated or missing
+    4. Sanitizes ai_analysis JSON to ensure key_points contains 2-3 objective job facts and removes candidate evaluation commentary
+    """
+    if not d or not isinstance(d, dict):
+        return d
+
+    import sources.base as base_mod
+
+    raw_emp = d.get("raw_employment_type") or d.get("employment_type")
+    title = d.get("title", "")
+    desc = d.get("description", "")
+
+    # 1. Employment Type Canonical Normalization
+    norm_emp = base_mod.normalize_employment_type(raw_emp, title, desc)
+    d["employment_type"] = norm_emp
+    d["employment_type_display"] = base_mod.format_employment_type_display(norm_emp)
+
+    # 2. Salary Re-hydration Fallback
+    sal_text = d.get("salary_text")
+    norm_sal = d.get("normalized_salary")
+    if not sal_text or sal_text == "Not disclosed" or not norm_sal or norm_sal == "Not disclosed":
+        m_inr, disp_sal, sal_ev = base_mod.extract_salary_with_evidence(sal_text, desc)
+        if disp_sal and disp_sal != "Not disclosed":
+            d["salary_text"] = disp_sal
+            d["normalized_salary"] = disp_sal
+            d["salary_evidence"] = sal_ev
+        else:
+            d["salary_text"] = "Not disclosed"
+            d["normalized_salary"] = "Not disclosed"
+
+    # 3. AI Analysis & Key Points Sanitization
+    if d.get("ai_analysis"):
+        if isinstance(d["ai_analysis"], str):
+            try:
+                d["ai_analysis"] = json.loads(d["ai_analysis"])
+            except Exception:
+                d["ai_analysis"] = {}
+        if isinstance(d["ai_analysis"], dict):
+            raw_kp = d["ai_analysis"].get("key_points", [])
+            clean_kp = []
+            if isinstance(raw_kp, list):
+                for p in raw_kp:
+                    p_str = str(p).strip()
+                    if p_str and not re.search(r"\b(candidate|omar|applicant|resume|profile|demonstrates|fit|match|alignment|suitable)\b", p_str.lower()):
+                        clean_kp.append(p_str)
+
+            if not clean_kp:
+                role_sum = d["ai_analysis"].get("role_summary") or title
+                techs = d["ai_analysis"].get("key_technologies") or []
+                clean_kp = [f"Focus: {role_sum}"]
+                if techs:
+                    clean_kp.append(f"Technologies: {', '.join(techs[:3])}")
+                if d.get("location"):
+                    clean_kp.append(f"Location: {d.get('location')}")
+
+            d["ai_analysis"]["key_points"] = clean_kp[:3]
+
+    if isinstance(d.get("resume_json"), str):
+        try:
+            d["resume_json"] = json.loads(d["resume_json"])
+        except Exception:
+            pass
+
+    return d
+
 def get_job_by_id(job_id: int, db_path: str = None) -> Optional[Dict[str, Any]]:
     """Fetches a single job by DB ID."""
     conn = get_connection(db_path)
@@ -381,18 +496,7 @@ def get_job_by_id(job_id: int, db_path: str = None) -> Optional[Dict[str, Any]]:
     conn.close()
     if not row:
         return None
-    data = dict(row)
-    if data.get("ai_analysis"):
-        try:
-            data["ai_analysis"] = json.loads(data["ai_analysis"])
-        except Exception:
-            pass
-    if data.get("resume_json"):
-        try:
-            data["resume_json"] = json.loads(data["resume_json"])
-        except Exception:
-            pass
-    return data
+    return _hydrate_job_record(dict(row))
 
 def delete_job_by_id(job_id: int, db_path: str = None) -> None:
     """Deletes a single job by DB ID."""
@@ -420,18 +524,7 @@ def get_all_jobs(status_filter: str = None, limit: int = 100, db_path: str = Non
     
     results = []
     for r in rows:
-        d = dict(r)
-        if d.get("ai_analysis"):
-            try:
-                d["ai_analysis"] = json.loads(d["ai_analysis"])
-            except Exception:
-                pass
-        if d.get("resume_json"):
-            try:
-                d["resume_json"] = json.loads(d["resume_json"])
-            except Exception:
-                pass
-        results.append(d)
+        results.append(_hydrate_job_record(dict(r)))
     return results
 
 # ---------------------------------------------------------------------------

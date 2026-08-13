@@ -9,6 +9,7 @@
         <p class="subtitle">Ranked job candidates with tailored resumes and application links.</p>
     </div>
     <div class="header-actions flex-gap">
+        <button onclick="triggerSheetSync()" class="btn btn-outline btn-sm">SYNC TO GOOGLE SHEET 🔄</button>
         {% if google_sheets_url %}
             <a href="{{ google_sheets_url }}" target="_blank" class="btn btn-primary btn-sm">OPEN GOOGLE SHEET ↗</a>
         {% else %}
@@ -34,17 +35,17 @@
     <table class="erp-data-table">
         <thead>
             <tr>
-                <th style="width: 50px;">Rank</th>
-                <th style="width: 130px;">Company</th>
-                <th style="width: 190px;">Position</th>
-                <th style="width: 130px;">Location</th>
-                <th style="width: 80px;">Type</th>
+                <th style="width: 45px;">Rank</th>
+                <th style="width: 125px;">Company</th>
+                <th style="width: 170px;">Position</th>
+                <th style="width: 110px;">Location</th>
+                <th style="width: 90px;">Type</th>
                 <th style="width: 110px;">Salary</th>
-                <th style="width: 280px;">Key Points</th>
-                <th style="width: 90px;">Score</th>
-                <th style="width: 120px;">Resume</th>
-                <th style="width: 80px;">Apply</th>
-                <th style="width: 130px;">Actions</th>
+                <th style="width: 250px;">Key Points</th>
+                <th style="width: 85px;">Score</th>
+                <th style="width: 110px;">Resume</th>
+                <th style="width: 75px;">Apply</th>
+                <th style="width: 110px;">Actions</th>
             </tr>
         </thead>
         <tbody>
@@ -53,30 +54,26 @@
                 <td class="cell-center">#{{ loop.index }}</td>
                 <td><strong>{{ job.company }}</strong></td>
                 <td>
-                    <div class="job-title-text">{{ job.title }}</div>
-                    <span class="job-source-tag">{{ job.source }}</span>
+                    <div class="job-title-text" title="{{ job.title|escape }}">{{ job.title }}</div>
+                    <span class="job-source-tag">{{ job.source|capitalize }} • {{ (job.discovery_lane or ('open' if job.source == 'adzuna' else 'targeted'))|capitalize }}</span>
                 </td>
                 <td>{{ job.location or 'Remote' }}</td>
-                <td><span class="badge badge-info">{{ job.employment_type or 'Unknown' }}</span></td>
+                <td><span class="badge badge-info">{{ job.employment_type_display or (job.employment_type|replace('_', ' ')|title if job.employment_type else 'Unknown') }}</span></td>
                 <td>
-                    {% set sal = job.normalized_salary or (job.ai_analysis.extracted_salary if job.ai_analysis else None) %}
-                    <span class="salary-text">{{ sal if sal and sal != 'None' else 'Not disclosed' }}</span>
+                    {% set sal = job.normalized_salary or job.salary_text or (job.ai_analysis.extracted_salary if job.ai_analysis else None) %}
+                    <span class="salary-text">{{ sal if sal and sal != 'None' and sal != 'null' else 'Not disclosed' }}</span>
                 </td>
                 <td class="cell-keypoints">
                     {% if job.ai_analysis and job.ai_analysis.key_points %}
                         <ul class="key-points-list">
                             {% for point in job.ai_analysis.key_points[:3] %}
-                                <li>• {{ point }}</li>
+                                <li title="{{ point|escape }}">• {{ point }}</li>
                             {% endfor %}
                         </ul>
-                        {% if job.ai_analysis.reason or job.ai_analysis.key_points|length > 3 %}
-                            <button onclick="openDetailsModal('{{ job.id }}', '{{ job.company|escape }}', '{{ job.title|escape }}')" class="btn-link-sm">[ View ]</button>
-                        {% endif %}
-                    {% elif job.ai_analysis and job.ai_analysis.reason %}
-                        <p class="reason-text">{{ job.ai_analysis.reason[:100] }}...</p>
-                        <button onclick="openDetailsModal('{{ job.id }}', '{{ job.company|escape }}', '{{ job.title|escape }}')" class="btn-link-sm">[ View ]</button>
+                        <button onclick="openDetailsModal('{{ job.id }}', '{{ job.company|escape }}', '{{ job.title|escape }}')" class="btn-link-sm">[ View Details ]</button>
                     {% else %}
-                        <span class="muted">Deterministic score match.</span>
+                        <span class="muted">Objective job summary</span>
+                        <button onclick="openDetailsModal('{{ job.id }}', '{{ job.company|escape }}', '{{ job.title|escape }}')" class="btn-link-sm">[ View Details ]</button>
                     {% endif %}
                     <!-- Hidden script data for details modal -->
                     <script id="job-detail-data-{{ job.id }}" type="application/json">
@@ -84,8 +81,8 @@
                     </script>
                 </td>
                 <td class="cell-center">
-                    <div class="score-badge">Final: {{ job.final_score or job.deterministic_score or 'N/A' }}</div>
-                    <div class="score-sub">Det: {{ job.deterministic_score or '-' }} | AI: {{ job.ai_score or '-' }}</div>
+                    <div class="score-badge">Final: {{ job.final_score|round(1) if job.final_score is not none else (job.deterministic_score|round(1) if job.deterministic_score is not none else 'N/A') }}</div>
+                    <div class="score-sub">Det: {{ job.deterministic_score|round(1) if job.deterministic_score is not none else '-' }} | AI: {{ job.ai_score|round(1) if job.ai_score is not none else '-' }}</div>
                 </td>
                 <td id="resume-cell-{{ job.id }}" class="cell-center">
                     {% if job.resume_tex_path or job.resume_json %}
