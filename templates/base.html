@@ -3,14 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Job Automator ERP{% endblock %}</title>
+    <title>{% block title %}Job Automator{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <header class="navbar">
         <div class="nav-container">
             <a href="{{ url_for('index') }}" class="nav-brand">Job Automator</a>
-            <nav class="nav-links">
+            <nav class="nav-links" aria-label="Main navigation">
                 <a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">Dashboard</a>
                 <a href="{{ url_for('setup') }}" class="nav-link {% if request.endpoint == 'setup' %}active{% endif %}">Upload CV</a>
                 <a href="{{ url_for('profile') }}" class="nav-link {% if request.endpoint == 'profile' %}active{% endif %}">Profile</a>
@@ -27,9 +30,9 @@
                 {% if messages %}
                     <div class="flash-messages">
                         {% for category, message in messages %}
-                            <div class="alert alert-{{ category }}">
+                            <div class="alert alert-{{ category }}" role="alert">
                                 <span>{{ message }}</span>
-                                <button type="button" class="alert-close" onclick="this.parentElement.remove()">×</button>
+                                <button type="button" class="alert-close" onclick="this.parentElement.remove()" aria-label="Dismiss">×</button>
                             </div>
                         {% endfor %}
                     </div>
@@ -42,7 +45,7 @@
 
     <footer class="footer">
         <div class="container">
-            <p>Personal Job Automation System V1 • Built with Flask, SQLite, Hosted AI & LaTeX</p>
+            <p>Personal Job Automation System V1 &bull; Flask &bull; SQLite &bull; Hosted AI &bull; LaTeX</p>
         </div>
     </footer>
 

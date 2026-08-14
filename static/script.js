@@ -24,20 +24,20 @@ document.addEventListener('DOMContentLoaded', function () {
                 method: 'POST',
                 body: formData
             })
-            .then(res => res.json())
-            .then(data => {
-                if (data.status === 'started') {
-                    startPolling();
-                } else {
-                    showToast(data.message || 'Error starting job search.', 'error');
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'started') {
+                        startPolling();
+                    } else {
+                        showToast(data.message || 'Error starting job search.', 'error');
+                        resetRunButtons();
+                    }
+                })
+                .catch(err => {
+                    console.error('Error triggering job run:', err);
+                    showToast('Failed to start run.', 'error');
                     resetRunButtons();
-                }
-            })
-            .catch(err => {
-                console.error('Error triggering job run:', err);
-                showToast('Failed to start run.', 'error');
-                resetRunButtons();
-            });
+                });
         });
     }
 
@@ -191,6 +191,47 @@ function confirmClearDb() {
     confirmClearDatabase();
 }
 
+function openClearResultsModal() {
+    fetch('/run/status')
+        .then(res => res.json())
+        .then(data => {
+            if (data.active) {
+                showToast('Stop the current run before clearing results.', 'warning');
+            } else {
+                const modal = document.getElementById('modal-clear-results');
+                if (modal) modal.classList.remove('hidden');
+            }
+        })
+        .catch(() => {
+            // If status check fails, open modal anyway
+            const modal = document.getElementById('modal-clear-results');
+            if (modal) modal.classList.remove('hidden');
+        });
+}
+
+function closeClearResultsModal() {
+    const modal = document.getElementById('modal-clear-results');
+    if (modal) modal.classList.add('hidden');
+}
+
+function confirmClearResults() {
+    closeClearResultsModal();
+    fetch('/database/clear', { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                showToast('Results cleared successfully.', 'success');
+                setTimeout(() => { window.location.reload(); }, 700);
+            } else {
+                showToast(data.message || 'Failed to clear results.', 'error');
+            }
+        })
+        .catch(err => {
+            console.error('Error clearing results:', err);
+            showToast('Failed to clear results.', 'error');
+        });
+}
+
 function openDetailsModal(jobId, company, title) {
     const scriptEl = document.getElementById(`job-detail-data-${jobId}`);
     const modal = document.getElementById('modal-job-details');
@@ -291,11 +332,23 @@ function generateResume(jobId, buttonEl) {
                 showToast('Resume created successfully.', 'success');
                 const cell = document.getElementById(`resume-cell-${jobId}`);
                 if (cell) {
+                    const score = result.body.match_score ? Math.round(result.body.match_score) : 85;
+                    const pdfAvailable = result.body.pdf_available === true;
+                    const pdfBtnHtml = pdfAvailable
+                        ? `<a href="/jobs/${jobId}/download-resume?format=pdf" class="btn btn-xs btn-primary" title="Download compiled PDF resume">Download PDF</a>`
+                        : `<span class="badge" style="background:#e2e8f0; color:#64748b; font-size:0.7rem;">PDF unavailable</span>`;
+
                     cell.innerHTML = `
                         <span class="badge badge-success">✓ Created</span>
-                        <div class="resume-btn-group" style="margin-top: 4px;">
-                            <a href="${result.body.view_url}" target="_blank" class="btn btn-xs btn-outline">Overleaf / .tex</a>
-                            <a href="${result.body.download_url}" class="btn btn-xs btn-secondary">Download</a>
+                        <div class="resume-score-badge" style="margin-top: 3px; font-size: 0.75rem; font-weight: 700; color: #166534; cursor: pointer;" onclick="openResumeDetailsModal('${jobId}')" title="Click to view ATS match details">
+                            Match: ${score}% ℹ️
+                        </div>
+                        <div class="resume-btn-group" style="margin-top: 4px; display: flex; flex-direction: column; gap: 3px; align-items: center;">
+                            ${pdfBtnHtml}
+                            <div style="display: flex; gap: 4px; justify-content: center;">
+                                <a href="/jobs/${jobId}/download-resume?format=tex" class="btn btn-xs btn-secondary" title="Download LaTeX .tex source">Source (.tex)</a>
+                                <a href="${result.body.view_url}" target="_blank" class="btn btn-xs btn-outline" title="Open in Overleaf / Raw View">Overleaf</a>
+                            </div>
                         </div>
                     `;
                 }
@@ -311,6 +364,85 @@ function generateResume(jobId, buttonEl) {
             showToast('Resume generation failed.', 'error');
             buttonEl.disabled = false;
             buttonEl.innerText = originalText;
+        });
+}
+
+function openResumeDetailsModal(jobId) {
+    fetch(`/jobs/${jobId}/resume-details`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success' && data.match_details) {
+                const modal = document.getElementById('modal-job-details');
+                const modalTitle = document.getElementById('details-modal-title');
+                const modalBody = document.getElementById('details-modal-body');
+                if (!modal || !modalBody) return;
+
+                if (modalTitle) modalTitle.innerText = `ATS Resume Match Analysis — ${data.company || 'Job'}`;
+
+                const md = data.match_details;
+                const subs = md.sub_scores || {};
+
+                let html = `
+                    <div style="margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid #e5e7eb;">
+                        <h4 style="margin: 0 0 6px 0; color: #15803d; font-size: 1.1rem; font-weight: 700;">
+                            Overall Resume Match Score: ${md.overall_score || data.resume_score || 85}%
+                        </h4>
+                        <p style="margin: 0; font-size: 0.85rem; color: #4b5563;">
+                            Calculated through deterministic keyword coverage, required qualification verification, and ATS layout validation.
+                        </p>
+                    </div>
+
+                    <div style="margin-bottom: 14px;">
+                        <h5 style="margin: 0 0 6px 0; font-size: 0.9rem; font-weight: 700; color: #1f2937;">📊 Sub-Score Breakdown</h5>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.82rem;">
+                            <div><strong>Keyword Coverage:</strong> ${subs.keyword_coverage || 85}%</div>
+                            <div><strong>Required Skills:</strong> ${subs.required_skills || 90}%</div>
+                            <div><strong>Preferred Skills:</strong> ${subs.preferred_skills || 80}%</div>
+                            <div><strong>Role & Seniority:</strong> ${subs.role_alignment || 90}%</div>
+                            <div><strong>Experience Relevance:</strong> ${subs.experience_relevance || 80}%</div>
+                            <div><strong>Project Relevance:</strong> ${subs.project_relevance || 85}%</div>
+                            <div><strong>ATS Formatting:</strong> ${subs.ats_format || 100}%</div>
+                            <div><strong>Content Quality:</strong> ${subs.content_quality || 90}%</div>
+                        </div>
+                    </div>
+                `;
+
+                if (md.strong_matches && md.strong_matches.length > 0) {
+                    html += `
+                        <div style="margin-bottom: 10px;">
+                            <strong style="color: #166534; font-size: 0.85rem;">✅ Strong Matching Skills:</strong>
+                            <div style="margin-top: 4px; font-size: 0.82rem; color: #374151;">${md.strong_matches.map(escapeHtml).join(', ')}</div>
+                        </div>
+                    `;
+                }
+
+                if (md.missing_required && md.missing_required.length > 0) {
+                    html += `
+                        <div style="margin-bottom: 10px;">
+                            <strong style="color: #991b1b; font-size: 0.85rem;">⚠️ Missing Required Skills (Factual Source of Truth):</strong>
+                            <div style="margin-top: 4px; font-size: 0.82rem; color: #374151;">${md.missing_required.map(escapeHtml).join(', ')}</div>
+                        </div>
+                    `;
+                }
+
+                if (md.missing_preferred && md.missing_preferred.length > 0) {
+                    html += `
+                        <div style="margin-bottom: 10px;">
+                            <strong style="color: #d97706; font-size: 0.85rem;">ℹ️ Missing Preferred Skills:</strong>
+                            <div style="margin-top: 4px; font-size: 0.82rem; color: #374151;">${md.missing_preferred.map(escapeHtml).join(', ')}</div>
+                        </div>
+                    `;
+                }
+
+                modalBody.innerHTML = html;
+                modal.classList.remove('hidden');
+            } else {
+                showToast('No ATS match details available for this job.', 'info');
+            }
+        })
+        .catch(err => {
+            console.error('Error fetching resume details:', err);
+            showToast('Failed to load resume details.', 'error');
         });
 }
 
@@ -380,59 +512,59 @@ function triggerCompanyDiscovery() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ company_name: companyName })
     })
-    .then(r => r.json())
-    .then(data => {
-        if (data.status === 'started' && data.task_id) {
-            activeDiscoveryTaskId = data.task_id;
-            if (activeDiscoveryInterval) clearInterval(activeDiscoveryInterval);
-            activeDiscoveryInterval = setInterval(pollCompanyDiscoveryStatus, 1000);
-        } else {
-            showToast(data.message || 'Discovery error', 'error');
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'started' && data.task_id) {
+                activeDiscoveryTaskId = data.task_id;
+                if (activeDiscoveryInterval) clearInterval(activeDiscoveryInterval);
+                activeDiscoveryInterval = setInterval(pollCompanyDiscoveryStatus, 1000);
+            } else {
+                showToast(data.message || 'Discovery error', 'error');
+                closeCompanyDiscoveryModal();
+                if (btnAdd) btnAdd.disabled = false;
+            }
+        })
+        .catch(err => {
+            showToast('Failed to start discovery.', 'error');
             closeCompanyDiscoveryModal();
             if (btnAdd) btnAdd.disabled = false;
-        }
-    })
-    .catch(err => {
-        showToast('Failed to start discovery.', 'error');
-        closeCompanyDiscoveryModal();
-        if (btnAdd) btnAdd.disabled = false;
-    });
+        });
 }
 
 function pollCompanyDiscoveryStatus() {
     if (!activeDiscoveryTaskId) return;
 
     fetch(`/companies/discover/status/${activeDiscoveryTaskId}`)
-    .then(r => r.json())
-    .then(data => {
-        if (data.status === 'completed' || data.status === 'failed') {
-            clearInterval(activeDiscoveryInterval);
-            activeDiscoveryInterval = null;
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'completed' || data.status === 'failed') {
+                clearInterval(activeDiscoveryInterval);
+                activeDiscoveryInterval = null;
 
-            const btnAdd = document.getElementById('btn-add-company');
-            if (btnAdd) btnAdd.disabled = false;
+                const btnAdd = document.getElementById('btn-add-company');
+                if (btnAdd) btnAdd.disabled = false;
 
-            if (data.status === 'completed' && data.candidate) {
-                closeCompanyDiscoveryModal();
-                openCompanyConfirmationModal(data.candidate);
-            } else {
+                if (data.status === 'completed' && data.candidate) {
+                    closeCompanyDiscoveryModal();
+                    openCompanyConfirmationModal(data.candidate);
+                } else {
+                    const logBox = document.getElementById('discovery-log-box');
+                    if (logBox) {
+                        logBox.innerHTML += `<div class="console-line text-danger">Could not verify a working career/job source for this company.</div>`;
+                    }
+                    showToast(data.error || 'Verification failed.', 'error');
+                }
+            } else if (data.logs && data.logs.length > 0) {
                 const logBox = document.getElementById('discovery-log-box');
                 if (logBox) {
-                    logBox.innerHTML += `<div class="console-line text-danger">Could not verify a working career/job source for this company.</div>`;
+                    logBox.innerHTML = data.logs.map(l => `<div class="console-line">${escapeHtml(l)}</div>`).join('');
+                    logBox.scrollTop = logBox.scrollHeight;
                 }
-                showToast(data.error || 'Verification failed.', 'error');
             }
-        } else if (data.logs && data.logs.length > 0) {
-            const logBox = document.getElementById('discovery-log-box');
-            if (logBox) {
-                logBox.innerHTML = data.logs.map(l => `<div class="console-line">${escapeHtml(l)}</div>`).join('');
-                logBox.scrollTop = logBox.scrollHeight;
-            }
-        }
-    })
-    .catch(err => {
-        console.error('Error polling discovery status:', err);
-    });
+        })
+        .catch(err => {
+            console.error('Error polling discovery status:', err);
+        });
 }
 
 function openCompanyDiscoveryModal(compName) {
@@ -456,9 +588,9 @@ function closeCompanyDiscoveryModal() {
 function openCompanyConfirmationModal(cand) {
     currentCandidatePayload = cand;
     const modal = document.getElementById('modal-company-confirmation');
-    
+
     document.getElementById('conf-company-name').innerHTML = `<strong>${escapeHtml(cand.company_name)}</strong>`;
-    
+
     const careersLink = document.getElementById('conf-careers-url');
     if (careersLink) {
         careersLink.href = cand.careers_url || '#';
@@ -471,10 +603,12 @@ function openCompanyConfirmationModal(cand) {
     const statusEl = document.getElementById('conf-verification-status');
     if (statusEl) {
         const verStatus = cand.verification_status || (cand.verified ? 'verified' : 'verification_failed');
-        if (verStatus === 'verified' && cand.verified && (cand.jobs_found || 0) > 0) {
+        if ((verStatus === 'verified' || verStatus.startsWith('verified_')) && cand.verified && (cand.jobs_found || 0) > 0) {
             statusEl.innerHTML = `<span class="badge badge-success">✓ VERIFIED</span>`;
         } else if (verStatus === 'no_jobs_found') {
             statusEl.innerHTML = `<span class="badge badge-warning">⚠ VERIFIED SOURCE — NO CURRENT JOBS</span>`;
+        } else if (verStatus === 'access_restricted') {
+            statusEl.innerHTML = `<span class="badge badge-danger">✗ ACCESS RESTRICTED</span>`;
         } else {
             statusEl.innerHTML = `<span class="badge badge-danger">✗ VERIFICATION FAILED</span>`;
         }
@@ -537,19 +671,19 @@ function confirmAddCompany() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(currentCandidatePayload)
     })
-    .then(r => r.json())
-    .then(data => {
-        if (data.status === 'success') {
-            showToast(`Added ${data.company.company} to Watchlist!`, 'success');
-            closeCompanyConfirmationModal();
-            setTimeout(() => window.location.reload(), 600);
-        } else {
-            showToast(data.message || 'Failed to save company', 'error');
-        }
-    })
-    .catch(err => {
-        showToast('Error saving company.', 'error');
-    });
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success') {
+                showToast(`Added ${data.company.company} to Watchlist!`, 'success');
+                closeCompanyConfirmationModal();
+                setTimeout(() => window.location.reload(), 600);
+            } else {
+                showToast(data.message || 'Failed to save company', 'error');
+            }
+        })
+        .catch(err => {
+            showToast('Error saving company.', 'error');
+        });
 }
 
 function openEditCompanyModalFromEl(el) {
@@ -591,12 +725,12 @@ function confirmSaveEditCompany() {
             body: JSON.stringify({ company: compName, enabled: enabledVal })
         })
     ])
-    .then(() => {
-        showToast(`Updated ${compName}.`, 'success');
-        closeEditCompanyModal();
-        setTimeout(() => window.location.reload(), 600);
-    })
-    .catch(err => showToast('Failed to update company.', 'error'));
+        .then(() => {
+            showToast(`Updated ${compName}.`, 'success');
+            closeEditCompanyModal();
+            setTimeout(() => window.location.reload(), 600);
+        })
+        .catch(err => showToast('Failed to update company.', 'error'));
 }
 
 function verifyCompany(compName) {
@@ -606,21 +740,21 @@ function verifyCompany(compName) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ company: compName })
     })
-    .then(r => r.json())
-    .then(data => {
-        if (data.status === 'success' && data.company) {
-            const comp = data.company;
-            if (comp.verified) {
-                showToast(`✓ ${comp.company}: Verified (${comp.jobs_found} jobs found)`, 'success');
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success' && data.company) {
+                const comp = data.company;
+                if (comp.verified) {
+                    showToast(`✓ ${comp.company}: Verified (${comp.jobs_found} jobs found)`, 'success');
+                } else {
+                    showToast(`✗ ${comp.company}: Verification failed`, 'error');
+                }
+                setTimeout(() => window.location.reload(), 1000);
             } else {
-                showToast(`✗ ${comp.company}: Verification failed`, 'error');
+                showToast(data.message || 'Verification error', 'error');
             }
-            setTimeout(() => window.location.reload(), 1000);
-        } else {
-            showToast(data.message || 'Verification error', 'error');
-        }
-    })
-    .catch(err => showToast('Failed to verify company.', 'error'));
+        })
+        .catch(err => showToast('Failed to verify company.', 'error'));
 }
 
 function openDeleteCompanyModal(compName) {
@@ -642,17 +776,17 @@ function confirmRemoveCompany() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ company: compName })
     })
-    .then(r => r.json())
-    .then(data => {
-        if (data.status === 'success') {
-            showToast(`Removed ${compName} from Watchlist.`, 'success');
-            closeDeleteCompanyModal();
-            setTimeout(() => window.location.reload(), 600);
-        } else {
-            showToast(data.message || 'Failed to remove company', 'error');
-        }
-    })
-    .catch(err => showToast('Error removing company.', 'error'));
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success') {
+                showToast(`Removed ${compName} from Watchlist.`, 'success');
+                closeDeleteCompanyModal();
+                setTimeout(() => window.location.reload(), 600);
+            } else {
+                showToast(data.message || 'Failed to remove company', 'error');
+            }
+        })
+        .catch(err => showToast('Error removing company.', 'error'));
 }
 
 let verifyAllInterval = null;
@@ -660,57 +794,57 @@ let verifyAllInterval = null;
 function verifyAllCompanies() {
     const modal = document.getElementById('modal-verify-all');
     if (modal) modal.classList.remove('hidden');
-    
+
     document.getElementById('verify-all-progress-text').innerText = 'Initializing batch verification...';
     document.getElementById('verify-all-log-box').innerHTML = '';
     document.getElementById('btn-close-verify-all').disabled = true;
-    
+
     fetch('/companies/verify-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
     })
-    .then(r => r.json())
-    .then(data => {
-        if (data.status === 'started') {
-            verifyAllInterval = setInterval(pollVerifyAllStatus, 1000);
-        } else {
-            showToast(data.message || 'Failed to start verification.', 'error');
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'started') {
+                verifyAllInterval = setInterval(pollVerifyAllStatus, 1000);
+            } else {
+                showToast(data.message || 'Failed to start verification.', 'error');
+                closeVerifyAllModal();
+            }
+        })
+        .catch(err => {
+            showToast('Error starting batch verification.', 'error');
             closeVerifyAllModal();
-        }
-    })
-    .catch(err => {
-        showToast('Error starting batch verification.', 'error');
-        closeVerifyAllModal();
-    });
+        });
 }
 
 function pollVerifyAllStatus() {
     fetch('/companies/verify-all/status')
-    .then(r => r.json())
-    .then(data => {
-        const progText = `[${data.current}/${data.total}] Verifying ${data.current_company}...`;
-        document.getElementById('verify-all-progress-text').innerText = progText;
-        
-        const logBox = document.getElementById('verify-all-log-box');
-        logBox.innerText = data.logs.join('\n');
-        logBox.scrollTop = logBox.scrollHeight;
-        
-        if (data.status === 'completed') {
-            clearInterval(verifyAllInterval);
-            document.getElementById('verify-all-progress-text').innerText = 'Batch verification completed successfully!';
-            document.getElementById('btn-close-verify-all').disabled = false;
-            showToast('Batch verification completed.', 'success');
-            setTimeout(() => window.location.reload(), 1500);
-        } else if (data.status === 'failed') {
-            clearInterval(verifyAllInterval);
-            document.getElementById('verify-all-progress-text').innerText = 'Batch verification failed.';
-            document.getElementById('btn-close-verify-all').disabled = false;
-            showToast('Batch verification failed.', 'error');
-        }
-    })
-    .catch(err => {
-        console.error('Error polling verify-all status:', err);
-    });
+        .then(r => r.json())
+        .then(data => {
+            const progText = `[${data.current}/${data.total}] Verifying ${data.current_company}...`;
+            document.getElementById('verify-all-progress-text').innerText = progText;
+
+            const logBox = document.getElementById('verify-all-log-box');
+            logBox.innerText = data.logs.join('\n');
+            logBox.scrollTop = logBox.scrollHeight;
+
+            if (data.status === 'completed') {
+                clearInterval(verifyAllInterval);
+                document.getElementById('verify-all-progress-text').innerText = 'Batch verification completed successfully!';
+                document.getElementById('btn-close-verify-all').disabled = false;
+                showToast('Batch verification completed.', 'success');
+                setTimeout(() => window.location.reload(), 1500);
+            } else if (data.status === 'failed') {
+                clearInterval(verifyAllInterval);
+                document.getElementById('verify-all-progress-text').innerText = 'Batch verification failed.';
+                document.getElementById('btn-close-verify-all').disabled = false;
+                showToast('Batch verification failed.', 'error');
+            }
+        })
+        .catch(err => {
+            console.error('Error polling verify-all status:', err);
+        });
 }
 
 function closeVerifyAllModal() {

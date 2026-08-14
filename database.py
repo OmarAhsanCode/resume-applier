@@ -124,6 +124,17 @@ def init_db(db_path: str = None) -> None:
     except sqlite3.OperationalError:
         pass
 
+    # Migration: Resume match score and details
+    try:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN resume_score REAL DEFAULT NULL;")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN resume_match_details TEXT DEFAULT NULL;")
+    except sqlite3.OperationalError:
+        pass
+
     # Runs table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS runs (
@@ -286,17 +297,19 @@ def mark_jobs_shown(job_ids: List[int], db_path: str = None) -> None:
     conn.commit()
     conn.close()
 
-def get_previously_shown_jobs(
+def get_eligible_candidate_jobs(
     excluded_statuses: List[str] = None,
-    limit: int = 500,
+    limit: int = 1000,
     db_path: str = None
 ) -> List[Dict[str, Any]]:
     """
-    Returns previously discovered jobs that are eligible to be re-shown,
-    ordered by least-recently-shown first (never-shown last — those are handled
-    as new in the pipeline; this is the fallback pool when new jobs are scarce).
+    Returns eligible candidate jobs from DB for ranking and selection.
+    Selection order:
+    1. Never-shown jobs (last_shown_at IS NULL), ordered by score DESC.
+    2. Previously-shown jobs (last_shown_at IS NOT NULL), ordered by last_shown_at ASC
+       (least-recently shown first), then score DESC.
 
-    Excluded statuses: applied, rejected, and any others that should never resurface.
+    Excluded statuses: applied, rejected.
     """
     if excluded_statuses is None:
         excluded_statuses = ["applied", "rejected"]
@@ -306,13 +319,29 @@ def get_previously_shown_jobs(
         SELECT * FROM jobs
         WHERE status NOT IN ({placeholders})
         ORDER BY
-            CASE WHEN last_shown_at IS NULL THEN 1 ELSE 0 END ASC,
+            CASE WHEN last_shown_at IS NULL THEN 0 ELSE 1 END ASC,
+            CASE WHEN last_shown_at IS NULL THEN CASE WHEN final_score IS NOT NULL THEN final_score ELSE 0 END END DESC,
+            CASE WHEN last_shown_at IS NULL THEN CASE WHEN deterministic_score IS NOT NULL THEN deterministic_score ELSE 0 END END DESC,
             last_shown_at ASC,
-            CASE WHEN final_score IS NOT NULL THEN final_score ELSE 0 END DESC
+            CASE WHEN final_score IS NOT NULL THEN final_score ELSE 0 END DESC,
+            CASE WHEN deterministic_score IS NOT NULL THEN deterministic_score ELSE 0 END DESC,
+            id DESC
         LIMIT ?
     """, (*excluded_statuses, limit)).fetchall()
     conn.close()
     return [_hydrate_job_record(dict(r)) for r in rows]
+
+def get_previously_shown_jobs(
+    excluded_statuses: List[str] = None,
+    limit: int = 500,
+    db_path: str = None
+) -> List[Dict[str, Any]]:
+    """
+    Returns previously discovered jobs that are eligible to be re-shown.
+    Backward-compatible alias for get_eligible_candidate_jobs.
+    """
+    return get_eligible_candidate_jobs(excluded_statuses=excluded_statuses, limit=limit, db_path=db_path)
+
 
 def save_job(job_data: Dict[str, Any], db_path: str = None) -> int:
     """Inserts a new job or updates an existing one if unique_id exists."""
@@ -435,21 +464,32 @@ def update_job_evaluation(job_id: int, deterministic_score: float = None, ai_sco
     conn.commit()
     conn.close()
 
-def update_job_resume(job_id: int, resume_json: Dict = None, tex_path: str = None, status: str = None, db_path: str = None) -> None:
-    """Updates resume data and generated paths for a job."""
+def update_job_resume(
+    job_id: int,
+    resume_json: Dict = None,
+    tex_path: str = None,
+    status: str = None,
+    resume_score: float = None,
+    resume_match_details: Dict = None,
+    db_path: str = None
+) -> None:
+    """Updates resume data, match score, details, and generated paths for a job."""
     conn = get_connection(db_path)
     now = datetime.now().isoformat()
     
     res_json_str = json.dumps(resume_json, ensure_ascii=False) if isinstance(resume_json, dict) else resume_json
-    
+    match_details_str = json.dumps(resume_match_details, ensure_ascii=False) if isinstance(resume_match_details, dict) else resume_match_details
+
     conn.execute("""
     UPDATE jobs SET
         resume_json = COALESCE(?, resume_json),
         resume_tex_path = COALESCE(?, resume_tex_path),
         status = COALESCE(?, status),
+        resume_score = COALESCE(?, resume_score),
+        resume_match_details = COALESCE(?, resume_match_details),
         updated_at = ?
     WHERE id = ?
-    """, (res_json_str, tex_path, status, now, job_id))
+    """, (res_json_str, tex_path, status, resume_score, match_details_str, now, job_id))
     conn.commit()
     conn.close()
 
@@ -531,6 +571,12 @@ def _hydrate_job_record(d: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(d.get("resume_json"), str):
         try:
             d["resume_json"] = json.loads(d["resume_json"])
+        except Exception:
+            pass
+
+    if isinstance(d.get("resume_match_details"), str):
+        try:
+            d["resume_match_details"] = json.loads(d["resume_match_details"])
         except Exception:
             pass
 

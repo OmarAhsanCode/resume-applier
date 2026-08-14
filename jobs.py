@@ -433,33 +433,43 @@ def run_job_search_pipeline(
             {"duplicate_count": duplicate_count, "filtered_count": filtered_count}
         )
 
-        # Build the full scored candidate pool:
-        # Priority 1: brand-new jobs (sorted by deterministic_score desc)
-        new_candidate_jobs.sort(key=lambda j: j["deterministic_score"], reverse=True)
+        # Step 4: Build candidate pool prioritizing never-shown jobs over previously-shown jobs.
+        db_candidates = database.get_eligible_candidate_jobs(
+            excluded_statuses=list(EXCLUDED_STATUSES),
+            limit=1000,
+            db_path=db_path
+        )
 
-        # Priority 2: previously-seen eligible jobs if we need to fill the requested count
-        # (excludes applied/rejected via get_previously_shown_jobs)
-        previously_seen_pool = []
-        if len(new_candidate_jobs) < requested_jobs:
-            needed = requested_jobs - len(new_candidate_jobs)
-            # Fetch previously-seen eligible jobs, ordered by least-recently-shown first
-            prev_jobs = database.get_previously_shown_jobs(
-                excluded_statuses=list(EXCLUDED_STATUSES),
-                limit=needed + 50,  # fetch a little extra to allow filtering
-                db_path=db_path
-            )
-            new_ids = {j["unique_id"] for j in new_candidate_jobs}
-            for pj in prev_jobs:
-                if pj["unique_id"] in new_ids:
-                    continue
-                # Re-apply hard filter in case preferences changed
-                filtered, _ = is_hard_filtered(pj, preferences, profile)
-                if not filtered:
-                    previously_seen_pool.append(pj)
-                if len(previously_seen_pool) >= needed:
-                    break
+        never_shown_candidates = []
+        previously_shown_candidates = []
 
-        valid_candidate_jobs = new_candidate_jobs + previously_seen_pool
+        for c_job in db_candidates:
+            # Re-apply hard filter in case preferences changed
+            filtered, _ = is_hard_filtered(c_job, preferences, profile)
+            if filtered:
+                continue
+
+            # Ensure deterministic score is computed
+            if c_job.get("deterministic_score") is None:
+                c_job["deterministic_score"] = calculate_deterministic_score(profile, preferences, c_job)
+
+            if c_job.get("last_shown_at") is None:
+                never_shown_candidates.append(c_job)
+            else:
+                previously_shown_candidates.append(c_job)
+
+        # Priority 1: Never-shown jobs, sorted by score DESC
+        never_shown_candidates.sort(
+            key=lambda j: (j.get("final_score") or j.get("deterministic_score") or 0.0),
+            reverse=True
+        )
+
+        # Priority 2/3: Previously-shown jobs, ordered by last_shown_at ASC (least recently shown first), then score DESC
+        previously_shown_candidates.sort(
+            key=lambda j: (j.get("last_shown_at") or "", -(j.get("final_score") or j.get("deterministic_score") or 0.0))
+        )
+
+        valid_candidate_jobs = never_shown_candidates + previously_shown_candidates
 
         if not valid_candidate_jobs:
             msg = "No eligible jobs found (new or previously seen)."
@@ -480,8 +490,7 @@ def run_job_search_pipeline(
         if stop_checker and stop_checker():
             return handle_stop()
 
-        # Step 4: Sort by deterministic score and pick top pool for AI analysis.
-        # New jobs are already first in the list; within each group sort by score.
+        # Step 4b: Pick top pool for AI analysis.
         ai_pool_size = min(len(valid_candidate_jobs), max(requested_jobs * 2, 5))
         ai_candidate_pool = valid_candidate_jobs[:ai_pool_size]
 
@@ -526,15 +535,24 @@ def run_job_search_pipeline(
         if stop_checker and stop_checker():
             return handle_stop()
 
-        # Step 6: Select Top N jobs
-        scored_jobs.sort(key=lambda j: j["final_score"], reverse=True)
-        selected_jobs = scored_jobs[:requested_jobs]
+        # Step 6: Select Top N jobs obeying Priority 1 (Never-shown) then Priority 2/3 (Previously-shown)
+        never_shown_scored = [j for j in scored_jobs if j.get("last_shown_at") is None]
+        previously_shown_scored = [j for j in scored_jobs if j.get("last_shown_at") is not None]
+
+        never_shown_scored.sort(key=lambda j: (j.get("final_score") or j.get("deterministic_score") or 0.0), reverse=True)
+        previously_shown_scored.sort(key=lambda j: (j.get("last_shown_at") or "", -(j.get("final_score") or j.get("deterministic_score") or 0.0)))
+
+        selected_jobs = never_shown_scored[:requested_jobs]
+        if len(selected_jobs) < requested_jobs:
+            needed = requested_jobs - len(selected_jobs)
+            selected_jobs.extend(previously_shown_scored[:needed])
+
         selected_count = len(selected_jobs)
 
         for s_job in selected_jobs:
             database.update_job_status(s_job["id"], "selected", db_path=db_path)
 
-        # Mark these jobs as shown so future runs deprioritize them correctly
+        # Mark ONLY the selected jobs as shown so future runs deprioritize them correctly
         database.mark_jobs_shown([j["id"] for j in selected_jobs], db_path=db_path)
 
         report_progress("Selection", f"Selected top {selected_count} jobs.", {"selected_count": selected_count})

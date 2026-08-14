@@ -1,36 +1,43 @@
 {% extends "base.html" %}
 
-{% block title %}Upload Master CV - Personal Job Automator{% endblock %}
+{% block title %}Upload Master CV — Job Automator{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h1>One-Time Setup: Upload Master CV</h1>
-    <p>Upload your current master resume PDF. The system will extract factual details using AI and store your structured profile.</p>
+    <h1>Set Up Your Master CV</h1>
+    <p>Upload your master resume once. We'll extract your candidate profile and use it as the factual source of truth for tailored applications.</p>
 </div>
 
-<div class="card form-card center-card">
+<div class="card center-card" style="max-width: 540px;">
+    <div class="card-section-label">Master CV</div>
     <form action="{{ url_for('setup') }}" method="POST" enctype="multipart/form-data">
-        <div class="file-upload-zone">
-            <input type="file" id="master_cv" name="master_cv" accept=".pdf" required class="file-input">
+        <div class="file-upload-zone" id="upload-zone">
+            <input type="file" id="master_cv" name="master_cv" accept=".pdf" required class="file-input"
+                   onchange="document.getElementById('file-name-display').textContent = this.files[0] ? '📎 ' + this.files[0].name : ''">
             <label for="master_cv" class="file-label">
                 <span class="upload-icon">📄</span>
-                <span class="upload-text">Click to choose Master CV (PDF)</span>
+                <span class="upload-text"><span>Choose PDF</span> or drag & drop</span>
+                <span class="upload-hint">PDF format only • Master resume</span>
             </label>
+            <div id="file-name-display" class="file-name-display"></div>
         </div>
 
-        <div class="form-actions">
-            <button type="submit" class="btn btn-primary btn-large">Parse CV & Create Profile</button>
+        <div class="form-actions" style="border-top: none; padding-top: 0; margin-top: 0;">
+            <button type="submit" class="btn btn-primary btn-lg">Parse CV &amp; Create Profile</button>
         </div>
     </form>
 </div>
 
 {% if candidate %}
-<div class="card info-card">
+<div class="info-card" style="max-width: 540px;">
+    <div class="configured-badge">✓ Profile configured</div>
     <h3>Currently Stored Profile</h3>
-    <p><strong>Name:</strong> {{ candidate.name }}</p>
-    <p><strong>Email:</strong> {{ candidate.email }}</p>
-    <p><strong>Last Updated:</strong> {{ candidate.updated_at[:19].replace('T', ' ') }}</p>
-    <a href="{{ url_for('profile') }}" class="btn btn-secondary">Review & Edit Profile →</a>
+    <p><strong>Name</strong> &nbsp; {{ candidate.name }}</p>
+    <p><strong>Email</strong> &nbsp; {{ candidate.email }}</p>
+    <p><strong>Last updated</strong> &nbsp; {{ candidate.updated_at[:19].replace('T', ' ') }}</p>
+    <div style="margin-top: 0.75rem;">
+        <a href="{{ url_for('profile') }}" class="btn btn-primary btn-sm">Review &amp; Edit Profile →</a>
+    </div>
 </div>
 {% endif %}
 {% endblock %}

@@ -590,131 +590,174 @@ def verify_discovered_source(
                 verification_status = "verification_failed"
                 failure_reason = f"SmartRecruiters request failed: {e}"
 
-        # STRATEGY 2: Fallback to HTML/Browser Careers Page Scrape
+        # STRATEGY 2: Official Careers Page HTML & First-Party Inspection
         if not endpoint_reachable and careers_url:
             log_progress(f"Strategy 1 API failed. Trying Strategy 2: official careers page fallback ({careers_url})...")
-            reachable, state_label, reach_reason, page_html = test_careers_page_reachable(careers_url)
-            
-            # If requests failed (not reachable), we can still try to get the HTML via Playwright!
-            if not reachable:
-                log_progress(f"Careers page unreachable via requests ({reach_reason}). Trying Playwright to retrieve HTML...")
-                try:
-                    from sources.browser_careers import sync_playwright
-                    if sync_playwright:
-                        with sync_playwright() as p:
-                            browser = p.chromium.launch(headless=True)
-                            context = browser.new_context(
-                                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                            )
-                            page = context.new_page()
-                            page.goto(careers_url, wait_until="networkidle", timeout=12000)
-                            
-                            from sources.browser_careers import check_page_for_challenges, AccessRestrictedError
-                            try:
-                                check_page_for_challenges(page.title(), page.content())
-                                page_html = page.content()
-                                reachable = True
-                                state_label = "reachable"
-                            except AccessRestrictedError as ae:
-                                state_label = "access_restricted"
-                                reach_reason = str(ae)
-                            browser.close()
-                except Exception as pe:
-                    log_progress(f"Playwright HTML retrieval failed: {pe}")
-            
-            if not reachable:
-                verification_status = state_label
-                failure_reason = f"Careers page fallback failed: {reach_reason}"
-            else:
-                # 2a. HTML Inspection Strategy
-                log_progress("Testing Strategy 2a: HTML inspection for embedded job content...")
-                html_ats = None
-                if page_html:
-                    # Greenhouse
-                    gh_match = re.search(r"boards(?:\-api)?\.greenhouse\.io/(?:v1/boards/)?([a-zA-Z0-9_\-]+)", page_html, re.I)
-                    if gh_match:
-                        slug_found = gh_match.group(1).lower()
-                        html_ats = {"ats_platform": "greenhouse", "ats_slug": slug_found}
-                    # Lever
-                    if not html_ats:
-                        lever_match = re.search(r"jobs\.lever\.co/([a-zA-Z0-9_\-]+)", page_html, re.I)
-                        if lever_match:
-                            html_ats = {"ats_platform": "lever", "ats_slug": lever_match.group(1).lower()}
-                    # Ashby
-                    if not html_ats:
-                        ashby_match = re.search(r"ashbyhq\.com/([a-zA-Z0-9_\-]+)", page_html, re.I)
-                        if ashby_match:
-                            html_ats = {"ats_platform": "ashby", "ats_slug": ashby_match.group(1).lower()}
-                    # Workday
-                    if not html_ats:
-                        wd_match = re.search(r"https?://([a-zA-Z0-9_\-\.]+\.myworkdayjobs\.com)/(?:wday/cxs/)?([a-zA-Z0-9_\-]+)", page_html, re.I)
-                        if wd_match:
-                            html_ats = {
-                                "ats_platform": "workday",
-                                "ats_slug": wd_match.group(2).lower(),
-                                "ats_host": wd_match.group(1).lower(),
-                                "ats_tenant": wd_match.group(2)
-                            }
-                    # SmartRecruiters
-                    if not html_ats:
-                        sr_match = re.search(r"smartrecruiters\.com/([a-zA-Z0-9_\-]+)", page_html, re.I)
-                        if sr_match:
-                            html_ats = {"ats_platform": "smartrecruiters", "ats_slug": sr_match.group(1).lower()}
+            import sources.first_party_careers as fp_mod
 
-                if html_ats:
-                    log_progress(f"HTML inspection identified {html_ats['ats_platform']} slug '{html_ats.get('ats_slug')}'")
-                    inspect_info = {
-                        "company_name": company,
-                        "ats_platform": html_ats["ats_platform"],
-                        "ats_slug": html_ats.get("ats_slug"),
-                        "ats_host": html_ats.get("ats_host"),
-                        "ats_tenant": html_ats.get("ats_tenant"),
-                        "careers_url": careers_url,
-                        "source_origin": "html_inspection"
-                    }
-                    sub_res = verify_discovered_source(inspect_info, progress_callback=progress_callback)
-                    if sub_res.get("verified"):
-                        endpoint_reachable = True
-                        valid_schema = True
-                        jobs_found = sub_res.get("jobs_found", 0)
-                        jobs_available = sub_res.get("jobs_available")
-                        jobs_retrieved = sub_res.get("jobs_retrieved", 0)
-                        detected_platform = sub_res.get("ats_platform")
-                        access_strategy = sub_res.get("access_strategy") or "html"
-                        candidate_info["ats_slug"] = html_ats.get("ats_slug")
-                        if html_ats.get("ats_host"): candidate_info["ats_host"] = html_ats["ats_host"]
-                        if html_ats.get("ats_tenant"): candidate_info["ats_tenant"] = html_ats["ats_tenant"]
+            # 2a. Probe first-party search / REST endpoints directly
+            try:
+                fp_api_jobs, total_avail = fp_mod.probe_first_party_api_or_search(careers_url, company)
+                if fp_api_jobs:
+                    endpoint_reachable = True
+                    valid_schema = True
+                    jobs_found = len(fp_api_jobs)
+                    jobs_available = total_avail if total_avail is not None else len(fp_api_jobs)
+                    jobs_retrieved = len(fp_api_jobs)
+                    detected_platform = "first_party"
+                    access_strategy = "api"
+                    log_progress(f"First-party search API succeeded! Found {jobs_found} jobs (available: {jobs_available}).")
+            except Exception as e:
+                logger.debug(f"[COMPANY DISCOVERY] First-party search probe error: {e}")
 
-                # 2b. Browser-Rendered Strategy via Playwright Fallback
-                if not endpoint_reachable:
-                    log_progress("Testing Strategy 2b: Headless Browser (Playwright) job rendering...")
+            if not endpoint_reachable:
+                reachable, state_label, reach_reason, page_html = test_careers_page_reachable(careers_url)
+                
+                # If requests failed (not reachable), we can still try to get the HTML via Playwright!
+                if not reachable:
+                    log_progress(f"Careers page unreachable via requests ({reach_reason}). Trying Playwright to retrieve HTML...")
                     try:
-                        from sources.browser_careers import discover_jobs_from_career_page, AccessRestrictedError
-                        comp_cfg = {"company": company, "careers_url": careers_url}
-                        search_cfg = {"preferred_roles": [""]} # Empty role for verification
-                        browser_jobs = discover_jobs_from_career_page(comp_cfg, search_cfg, progress_callback=log_progress)
-                        
-                        if browser_jobs:
+                        from sources.browser_careers import sync_playwright
+                        if sync_playwright:
+                            with sync_playwright() as p:
+                                browser = p.chromium.launch(headless=True)
+                                context = browser.new_context(
+                                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                                )
+                                page = context.new_page()
+                                page.goto(careers_url, wait_until="domcontentloaded", timeout=12000)
+                                
+                                from sources.first_party_careers import check_page_for_challenges, AccessRestrictedError
+                                try:
+                                    check_page_for_challenges(page.title(), page.content())
+                                    page_html = page.content()
+                                    reachable = True
+                                    state_label = "reachable"
+                                    reach_reason = None
+                                except AccessRestrictedError as ae:
+                                    state_label = "access_restricted"
+                                    reach_reason = str(ae)
+                                browser.close()
+                    except Exception as pe:
+                        log_progress(f"Playwright HTML retrieval failed: {pe}")
+                
+                if not reachable:
+                    verification_status = state_label
+                    failure_reason = f"Careers page fallback failed: {reach_reason}"
+                else:
+                    # 2b. HTML Inspection Strategy for embedded ATS links
+                    log_progress("Testing Strategy 2b: HTML inspection for embedded ATS links...")
+                    html_ats = None
+                    if page_html:
+                        gh_match = re.search(r"boards(?:\-api)?\.greenhouse\.io/(?:v1/boards/)?([a-zA-Z0-9_\-]+)", page_html, re.I)
+                        if gh_match:
+                            slug_found = gh_match.group(1).lower()
+                            html_ats = {"ats_platform": "greenhouse", "ats_slug": slug_found}
+                        if not html_ats:
+                            lever_match = re.search(r"jobs\.lever\.co/([a-zA-Z0-9_\-]+)", page_html, re.I)
+                            if lever_match:
+                                html_ats = {"ats_platform": "lever", "ats_slug": lever_match.group(1).lower()}
+                        if not html_ats:
+                            ashby_match = re.search(r"ashbyhq\.com/([a-zA-Z0-9_\-]+)", page_html, re.I)
+                            if ashby_match:
+                                html_ats = {"ats_platform": "ashby", "ats_slug": ashby_match.group(1).lower()}
+                        if not html_ats:
+                            wd_match = re.search(r"https?://([a-zA-Z0-9_\-\.]+\.myworkdayjobs\.com)/(?:wday/cxs/)?([a-zA-Z0-9_\-]+)", page_html, re.I)
+                            if wd_match:
+                                html_ats = {
+                                    "ats_platform": "workday",
+                                    "ats_slug": wd_match.group(2).lower(),
+                                    "ats_host": wd_match.group(1).lower(),
+                                    "ats_tenant": wd_match.group(2)
+                                }
+                        if not html_ats:
+                            sr_match = re.search(r"smartrecruiters\.com/([a-zA-Z0-9_\-]+)", page_html, re.I)
+                            if sr_match:
+                                html_ats = {"ats_platform": "smartrecruiters", "ats_slug": sr_match.group(1).lower()}
+
+                    if html_ats:
+                        log_progress(f"HTML inspection identified {html_ats['ats_platform']} slug '{html_ats.get('ats_slug')}'")
+                        inspect_info = {
+                            "company_name": company,
+                            "ats_platform": html_ats["ats_platform"],
+                            "ats_slug": html_ats.get("ats_slug"),
+                            "ats_host": html_ats.get("ats_host"),
+                            "ats_tenant": html_ats.get("ats_tenant"),
+                            "careers_url": careers_url,
+                            "source_origin": "html_inspection"
+                        }
+                        sub_res = verify_discovered_source(inspect_info, progress_callback=progress_callback)
+                        if sub_res.get("verified") and (sub_res.get("jobs_found", 0) or 0) > 0:
                             endpoint_reachable = True
                             valid_schema = True
-                            jobs_found = len(browser_jobs)
-                            jobs_available = None # Unknown exact total
-                            jobs_retrieved = len(browser_jobs)
-                            detected_platform = platform if platform != "unknown" else "workday" # Default to Workday if unknown
-                            access_strategy = "browser"
-                            log_progress(f"Browser fallback succeeded! Retrieved {jobs_found} jobs.")
-                        else:
-                            if is_speculative:
-                                verification_status = "verification_failed"
+                            jobs_found = sub_res.get("jobs_found", 0)
+                            jobs_available = sub_res.get("jobs_available")
+                            jobs_retrieved = sub_res.get("jobs_retrieved", 0)
+                            detected_platform = sub_res.get("ats_platform")
+                            access_strategy = sub_res.get("access_strategy") or "html"
+                            candidate_info["ats_slug"] = html_ats.get("ats_slug")
+                            if html_ats.get("ats_host"): candidate_info["ats_host"] = html_ats["ats_host"]
+                            if html_ats.get("ats_tenant"): candidate_info["ats_tenant"] = html_ats["ats_tenant"]
+
+                    # 2c. First-party JSON-LD, AF_initData & DOM job-card extraction
+                    if not endpoint_reachable and page_html:
+                        log_progress("Testing Strategy 2c: JSON-LD, inline data and HTML job-card structured extraction...")
+                        try:
+                            af_jobs, af_total = fp_mod.extract_jobs_from_af_init_data(page_html, company, careers_url)
+                            ld_jobs = fp_mod.extract_jobs_from_json_ld(page_html, careers_url, company)
+                            dom_jobs = fp_mod.extract_jobs_from_html(page_html, careers_url, company)
+                            combined_fp_jobs = list(af_jobs)
+                            seen_urls_set = {x["application_url"] for x in combined_fp_jobs}
+                            for j in ld_jobs:
+                                if j["application_url"] not in seen_urls_set:
+                                    seen_urls_set.add(j["application_url"])
+                                    combined_fp_jobs.append(j)
+                            for j in dom_jobs:
+                                if j["application_url"] not in seen_urls_set:
+                                    seen_urls_set.add(j["application_url"])
+                                    combined_fp_jobs.append(j)
+
+                            if combined_fp_jobs:
+                                endpoint_reachable = True
+                                valid_schema = True
+                                jobs_found = len(combined_fp_jobs)
+                                jobs_available = af_total if af_total is not None else len(combined_fp_jobs)
+                                jobs_retrieved = len(combined_fp_jobs)
+                                detected_platform = "first_party"
+                                access_strategy = "html"
+                                log_progress(f"First-party static inspection succeeded! Found {jobs_found} jobs (available: {jobs_available}).")
+                        except Exception as e:
+                            logger.debug(f"[COMPANY DISCOVERY] First-party static extraction error: {e}")
+
+                    # STRATEGY 3: Generic Playwright First-Party Browser Discovery
+                    if not endpoint_reachable:
+                        log_progress("Testing Strategy 3: Headless Browser (Playwright) first-party discovery...")
+                        try:
+                            comp_cfg = {"company": company, "careers_url": careers_url}
+                            search_cfg = {"preferred_roles": [""]}
+                            browser_jobs, total_avail = fp_mod.discover_first_party_with_browser(comp_cfg, search_cfg, progress_callback=log_progress)
+                            
+                            if browser_jobs:
+                                endpoint_reachable = True
+                                valid_schema = True
+                                jobs_found = len(browser_jobs)
+                                jobs_available = total_avail if total_avail is not None else len(browser_jobs)
+                                jobs_retrieved = len(browser_jobs)
+                                detected_platform = platform if platform != "unknown" else "first_party"
+                                access_strategy = "browser"
+                                log_progress(f"First-party browser discovery succeeded! Retrieved {jobs_found} jobs (available: {jobs_available}).")
                             else:
-                                verification_status = "no_jobs_found"
-                            failure_reason = "Careers page reachable, but browser extracted 0 jobs."
-                    except AccessRestrictedError as e:
-                        verification_status = "access_restricted"
-                        failure_reason = str(e)
-                    except Exception as e:
-                        verification_status = "verification_failed"
-                        failure_reason = f"Browser fallback failed: {e}"
+                                if is_speculative:
+                                    verification_status = "verification_failed"
+                                else:
+                                    verification_status = "no_jobs_found"
+                                failure_reason = "Careers page reachable, but first-party extraction returned 0 jobs."
+                        except fp_mod.AccessRestrictedError as e:
+                            verification_status = "access_restricted"
+                            failure_reason = str(e)
+                        except Exception as e:
+                            verification_status = "verification_failed"
+                            failure_reason = f"Browser discovery failed: {e}"
 
     # Evaluate final state
     verified = False
@@ -725,7 +768,12 @@ def verify_discovered_source(
         if has_positive_jobs:
             verified = True
             addable = True
-            verification_status = f"verified_{access_strategy}" if access_strategy in ("api", "html", "browser") else "verified"
+            if detected_platform == "first_party":
+                verification_status = "verified_first_party"
+            elif access_strategy in ("api", "html", "browser"):
+                verification_status = f"verified_{access_strategy}"
+            else:
+                verification_status = "verified"
             display_count = jobs_available if jobs_available is not None else jobs_found
             verification_reason = f"Source verified via {access_strategy.upper()} with {display_count} jobs."
         else:
@@ -741,8 +789,7 @@ def verify_discovered_source(
         verified = False
         addable = False
         jobs_found = None
-        # verification_status and failure_reason are set by the failing strategies above
-        verification_reason = failure_reason or f"Could not verify a working ATS source for {company}."
+        verification_reason = failure_reason or f"Could not verify a working career portal source for {company}."
 
     now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
@@ -768,4 +815,5 @@ def verify_discovered_source(
         log_progress(f"Verification output: [{verification_status.upper()}] {verification_reason}")
 
     return candidate_info
+
 

@@ -133,7 +133,7 @@ def add_company_config(
     else:
         jobs_count = 0
 
-    valid_verified_statuses = ("verified", "verified_api", "verified_html", "verified_browser")
+    valid_verified_statuses = ("verified", "verified_api", "verified_html", "verified_browser", "verified_first_party")
     if not is_verified or not is_addable or ver_status not in valid_verified_statuses or jobs_count <= 0:
         reason = company_data.get("verification_reason") or "Company source is unverified or has no active jobs."
         raise ValueError(f"Cannot save company '{comp_name}': {reason}")
@@ -335,7 +335,7 @@ def verify_company_config(
         target_comp["access_strategy"] = verified_res["access_strategy"]
 
     # Also update sources.json if verified
-    if verified_res.get("verified", False) and verified_res.get("verification_status") in ("verified", "verified_api", "verified_html", "verified_browser"):
+    if verified_res.get("verified", False) and verified_res.get("verification_status") in ("verified", "verified_api", "verified_html", "verified_browser", "verified_first_party"):
         source_type = (verified_res.get("ats_platform") or target_comp.get("source") or "unknown").lower()
         slug = (verified_res.get("ats_slug") or target_comp.get("source_identifier") or company_name).lower().replace(" ", "").replace("&", "")
         

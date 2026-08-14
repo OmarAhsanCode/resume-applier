@@ -1,14 +1,15 @@
 {% extends "base.html" %}
 
-{% block title %}Results - Job Automator ERP{% endblock %}
+{% block title %}Results — Job Automator{% endblock %}
 
 {% block content %}
 <div class="erp-page-header flex-between align-center">
     <div>
-        <h2>Selected Job Opportunities</h2>
-        <p class="subtitle">Ranked job candidates with tailored resumes and application links.</p>
+        <h2>Job Opportunities</h2>
+        <p class="subtitle">Ranked by preferences, deterministic scoring, and AI evaluation.</p>
     </div>
     <div class="header-actions flex-gap">
+        <button onclick="openClearResultsModal()" class="btn btn-danger btn-sm" title="Clear current job results">CLEAR RESULTS 🗑️</button>
         <button onclick="triggerSheetSync()" class="btn btn-outline btn-sm">SYNC TO GOOGLE SHEET 🔄</button>
         {% if google_sheets_url %}
             <a href="{{ google_sheets_url }}" target="_blank" class="btn btn-primary btn-sm">OPEN GOOGLE SHEET ↗</a>
@@ -28,80 +29,88 @@
 
 {% if jobs %}
 <div class="discovery-summary-strip">
-    <strong>Discovery Summary:</strong> Displaying {{ jobs|length }} selected job opportunities processed through deterministic ranking and AI evaluation.
+    <strong>{{ jobs|length }}</strong> job opportunities — ranked by deterministic score and AI evaluation.
 </div>
 
 <div class="card table-container-card">
-    <table class="erp-data-table">
+    <table class="erp-data-table" aria-label="Job opportunities">
         <thead>
             <tr>
-                <th style="width: 45px;">Rank</th>
-                <th style="width: 125px;">Company</th>
-                <th style="width: 170px;">Position</th>
-                <th style="width: 110px;">Location</th>
-                <th style="width: 90px;">Type</th>
-                <th style="width: 110px;">Salary</th>
-                <th style="width: 250px;">Key Points</th>
-                <th style="width: 85px;">Score</th>
-                <th style="width: 110px;">Resume</th>
-                <th style="width: 75px;">Apply</th>
-                <th style="width: 110px;">Actions</th>
+                <th style="width: 42px;">#</th>
+                <th style="width: 120px;">Company</th>
+                <th style="width: 165px;">Position</th>
+                <th style="width: 105px;">Location</th>
+                <th style="width: 85px;">Type</th>
+                <th style="width: 100px;">Salary</th>
+                <th style="width: 240px;">Key Points</th>
+                <th style="width: 88px;">Score</th>
+                <th style="width: 115px;">Resume</th>
+                <th style="width: 70px;">Apply</th>
+                <th style="width: 108px;">Status</th>
             </tr>
         </thead>
         <tbody>
             {% for job in jobs %}
             <tr id="job-row-{{ job.id }}" class="job-row status-{{ job.status }}">
-                <td class="cell-center">#{{ loop.index }}</td>
+                <td class="cell-center" style="color: var(--text-muted); font-weight: 600;">#{{ loop.index }}</td>
                 <td><strong>{{ job.company }}</strong></td>
                 <td>
                     <div class="job-title-text" title="{{ job.title|escape }}">{{ job.title }}</div>
-                    <span class="job-source-tag">{{ job.source|capitalize }} • {{ (job.discovery_lane or ('open' if job.source == 'adzuna' else 'targeted'))|capitalize }}</span>
+                    <span class="job-source-tag">{{ job.source|capitalize }} · {{ (job.discovery_lane or ('open' if job.source == 'adzuna' else 'targeted'))|capitalize }}</span>
                 </td>
-                <td>{{ job.location or 'Remote' }}</td>
-                <td><span class="badge badge-info">{{ job.employment_type_display or (job.employment_type|replace('_', ' ')|title if job.employment_type else 'Unknown') }}</span></td>
+                <td style="font-size: 0.8rem;">{{ job.location or 'Remote' }}</td>
+                <td>
+                    <span class="badge badge-info">{{ job.employment_type_display or (job.employment_type|replace('_', ' ')|title if job.employment_type else 'Unknown') }}</span>
+                </td>
                 <td>
                     {% set sal = job.normalized_salary or job.salary_text or (job.ai_analysis.extracted_salary if job.ai_analysis else None) %}
                     <span class="salary-text">{{ sal if sal and sal != 'None' and sal != 'null' else 'Not disclosed' }}</span>
                 </td>
                 <td class="cell-keypoints">
                     {% if job.ai_analysis and job.ai_analysis.key_points %}
-                        <ul class="key-points-list">
-                            {% for point in job.ai_analysis.key_points[:3] %}
-                                <li title="{{ point|escape }}">• {{ point }}</li>
-                            {% endfor %}
-                        </ul>
-                        <button onclick="openDetailsModal('{{ job.id }}', '{{ job.company|escape }}', '{{ job.title|escape }}')" class="btn-link-sm">[ View Details ]</button>
+                    <ul class="key-points-list">
+                        {% for point in job.ai_analysis.key_points[:3] %}
+                        <li title="{{ point|escape }}">• {{ point }}</li>
+                        {% endfor %}
+                    </ul>
+                    <button onclick="openDetailsModal('{{ job.id }}', '{{ job.company|escape }}', '{{ job.title|escape }}')" class="btn-link-sm">[ View Details ]</button>
                     {% else %}
-                        <span class="muted">Objective job summary</span>
-                        <button onclick="openDetailsModal('{{ job.id }}', '{{ job.company|escape }}', '{{ job.title|escape }}')" class="btn-link-sm">[ View Details ]</button>
+                    <span class="muted" style="font-size: 0.77rem;">Objective job summary</span>
+                    <button onclick="openDetailsModal('{{ job.id }}', '{{ job.company|escape }}', '{{ job.title|escape }}')" class="btn-link-sm">[ View Details ]</button>
                     {% endif %}
-                    <!-- Hidden script data for details modal -->
-                    <script id="job-detail-data-{{ job.id }}" type="application/json">
-                        {{ (job.ai_analysis or {})|tojson }}
-                    </script>
+                    <!-- Hidden data for details modal -->
+                    <script id="job-detail-data-{{ job.id }}" type="application/json">{{ (job.ai_analysis or {})|tojson }}</script>
                 </td>
                 <td class="cell-center">
-                    <div class="score-badge">Final: {{ job.final_score|round(1) if job.final_score is not none else (job.deterministic_score|round(1) if job.deterministic_score is not none else 'N/A') }}</div>
-                    <div class="score-sub">Det: {{ job.deterministic_score|round(1) if job.deterministic_score is not none else '-' }} | AI: {{ job.ai_score|round(1) if job.ai_score is not none else '-' }}</div>
+                    <div class="score-badge">{{ job.final_score|round(1) if job.final_score is not none else (job.deterministic_score|round(1) if job.deterministic_score is not none else 'N/A') }}</div>
+                    <div class="score-sub">Det: {{ job.deterministic_score|round(1) if job.deterministic_score is not none else '–' }} | AI: {{ job.ai_score|round(1) if job.ai_score is not none else '–' }}</div>
                 </td>
                 <td id="resume-cell-{{ job.id }}" class="cell-center">
                     {% if job.resume_tex_path or job.resume_json %}
-                        <span class="badge badge-success">✓ Created</span>
-                        <div class="resume-btn-group">
-                            <a href="{{ url_for('view_resume', job_id=job.id) }}" target="_blank" class="btn btn-xs btn-outline">Overleaf / .tex</a>
-                            <a href="{{ url_for('download_resume', job_id=job.id) }}" class="btn btn-xs btn-secondary">Download</a>
+                    <span class="badge badge-success">✓ Created</span>
+                    {% if job.resume_score %}
+                    <div class="resume-score-badge" onclick="openResumeDetailsModal('{{ job.id }}')" title="Click for ATS details">
+                        Match: {{ job.resume_score|round(0)|int }}% ℹ️
+                    </div>
+                    {% endif %}
+                    <div style="margin-top: 4px; display: flex; flex-direction: column; gap: 3px; align-items: center;">
+                        <a href="{{ url_for('download_resume', job_id=job.id, format='pdf') }}" class="btn btn-xs btn-primary" title="Download PDF resume">Download PDF</a>
+                        <div style="display: flex; gap: 3px; justify-content: center;">
+                            <a href="{{ url_for('download_resume', job_id=job.id, format='tex') }}" class="btn btn-xs btn-secondary" title="Download LaTeX source">Source (.tex)</a>
+                            <a href="{{ url_for('view_resume', job_id=job.id) }}" target="_blank" class="btn btn-xs btn-outline" title="Open in Overleaf">Overleaf</a>
                         </div>
+                    </div>
                     {% else %}
-                        <button id="resume-btn-{{ job.id }}" onclick="generateResume('{{ job.id }}', this)" class="btn btn-xs btn-primary">Generate</button>
+                    <button id="resume-btn-{{ job.id }}" onclick="generateResume('{{ job.id }}', this)" class="btn btn-xs btn-primary">Generate</button>
                     {% endif %}
                 </td>
                 <td class="cell-center">
-                    <a href="{{ job.application_url }}" target="_blank" class="btn btn-xs btn-action">Apply 🔗</a>
+                    <a href="{{ job.application_url }}" target="_blank" class="btn btn-xs btn-action" rel="noopener noreferrer">Apply 🔗</a>
                 </td>
                 <td class="cell-center">
                     <div class="action-buttons">
                         <button onclick="updateJobStatus('{{ job.id }}', 'applied')" class="btn-icon btn-mark-applied {% if job.status == 'applied' %}active{% endif %}" title="Mark Applied">Applied</button>
-                        <button onclick="updateJobStatus('{{ job.id }}', 'saved')" class="btn-icon btn-mark-saved {% if job.status == 'saved' %}active{% endif %}" title="Save">Save</button>
+                        <button onclick="updateJobStatus('{{ job.id }}', 'saved')" class="btn-icon btn-mark-saved {% if job.status == 'saved' %}active{% endif %}" title="Save for later">Save</button>
                         <button onclick="updateJobStatus('{{ job.id }}', 'rejected')" class="btn-icon btn-mark-rejected {% if job.status == 'rejected' %}active{% endif %}" title="Reject">Reject</button>
                     </div>
                 </td>
@@ -110,25 +119,52 @@
         </tbody>
     </table>
 </div>
+
 {% else %}
-<div class="card empty-card">
-    <h4>No Jobs Found</h4>
-    <p>No jobs matching filter exist. Execute job search from <a href="{{ url_for('index') }}">Dashboard</a>.</p>
+<div class="empty-card">
+    <h4>No job opportunities yet</h4>
+    <p>Run a discovery search to find opportunities matching your preferences. {% if current_filter %}Try clearing the filter to see all jobs.{% endif %}</p>
+    <a href="{{ url_for('index') }}" class="btn btn-primary">Run Discovery →</a>
 </div>
 {% endif %}
 
-<!-- Details / Key Points Modal -->
+<!-- Job Details Modal -->
 <div id="modal-job-details" class="modal-overlay hidden">
     <div class="modal-box modal-box-large">
         <div class="modal-header">
             <h4 id="details-modal-title">Job Details</h4>
-            <button onclick="closeDetailsModal()" class="btn-close">×</button>
+            <button onclick="closeDetailsModal()" class="btn-close" aria-label="Close">×</button>
         </div>
         <div class="modal-body" id="details-modal-body">
             <!-- Populated via JS -->
         </div>
         <div class="modal-footer">
             <button onclick="closeDetailsModal()" class="btn btn-secondary">CLOSE</button>
+        </div>
+    </div>
+</div>
+
+<!-- Clear Results Confirmation Modal -->
+<div id="modal-clear-results" class="modal-overlay hidden">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h4 style="color: var(--danger);">Clear Results?</h4>
+            <button onclick="closeClearResultsModal()" class="btn-close" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body" style="line-height: 1.55; font-size: 0.85rem;">
+            <p style="margin-bottom: 10px;"><strong>This will remove the currently stored job results and reset the Results view.</strong></p>
+            <p style="color: var(--text-muted); margin-bottom: 6px;">The following will remain completely intact:</p>
+            <ul style="margin-left: 1.2rem; color: var(--text-muted); margin-bottom: 12px; line-height: 1.8;">
+                <li>Master Candidate Profile (CV info)</li>
+                <li>Job Search Preferences</li>
+                <li>Watchlist Companies configuration</li>
+                <li>Resume Settings</li>
+            </ul>
+            <p style="color: var(--danger); font-size: 0.8rem; font-weight: 600;">Are you sure you want to clear current job results?</p>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeClearResultsModal()" class="btn btn-secondary">CANCEL</button>
+            <button onclick="confirmClearResults()" class="btn btn-danger">CLEAR RESULTS</button>
         </div>
     </div>
 </div>

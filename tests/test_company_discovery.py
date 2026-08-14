@@ -528,16 +528,17 @@ class TestCompanyDiscoveryV1_3(unittest.TestCase):
             "careers_url": "https://www.focussoftnet.com/careers"
         }
         with patch("requests.get") as mock_get:
-            mock_resp = MagicMock()
-            mock_resp.status_code = 200
-            mock_resp.text = "<html></html>"
-            mock_resp.json.return_value = {"content": []}
-            mock_get.return_value = mock_resp
+            with patch("sources.first_party_careers.discover_first_party_with_browser", return_value=([], None)):
+                mock_resp = MagicMock()
+                mock_resp.status_code = 200
+                mock_resp.text = "<html></html>"
+                mock_resp.json.return_value = {"content": []}
+                mock_get.return_value = mock_resp
 
-            res = company_discovery.verify_discovered_source(cand)
-            self.assertFalse(res["verified"])
-            self.assertFalse(res["addable"])
-            self.assertEqual(res["verification_status"], "verification_failed")
+                res = company_discovery.verify_discovered_source(cand)
+                self.assertFalse(res["verified"])
+                self.assertFalse(res["addable"])
+                self.assertEqual(res["verification_status"], "verification_failed")
 
     # Reg 6: Unverified candidate cannot be persisted
     def test_reg_6_unverified_cannot_be_persisted(self):

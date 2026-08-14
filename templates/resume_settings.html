@@ -1,42 +1,63 @@
 {% extends "base.html" %}
 
-{% block title %}Resume Settings - Personal Job Automator{% endblock %}
+{% block title %}Resume Configuration — Job Automator{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h1>Resume Layout & Settings</h1>
-    <p>Configure section layout order and instructions for LaTeX resume rendering.</p>
+    <h1>Resume Configuration</h1>
+    <p>Control the structure and tailoring instructions used when generating your resumes.</p>
 </div>
 
 <div class="card form-card">
     <form action="{{ url_for('resume_settings_route') }}" method="POST">
-        <div class="form-group">
-            <label for="template">Resume Template Choice</label>
-            <select id="template" name="template" class="form-input">
-                <option value="ats" {% if settings.template == 'ats' %}selected{% endif %}>ATS-Optimized Single Page (Default)</option>
-                <option value="modern" {% if settings.template == 'modern' %}selected{% endif %}>Modern Clean LaTeX</option>
-            </select>
+
+        <!-- Template + Length side by side -->
+        <div class="card-section">
+            <div class="form-row">
+                <div class="form-group flex-1">
+                    <label for="template">Resume Template</label>
+                    <select id="template" name="template" class="form-input">
+                        <option value="ats" {% if settings.template == 'ats' %}selected{% endif %}>ATS-Optimized Single Page (Default)</option>
+                        <option value="modern" {% if settings.template == 'modern' %}selected{% endif %}>Modern Clean LaTeX</option>
+                    </select>
+                    <small class="help-text">ATS-Optimized is recommended for most job boards and applicant tracking systems.</small>
+                </div>
+                <div class="form-group" style="width: 160px; flex-shrink: 0;">
+                    <label for="resume_length">Target Page Length</label>
+                    <input type="number" id="resume_length" name="resume_length"
+                           value="{{ settings.resume_length }}" min="1" max="2"
+                           class="form-input">
+                    <small class="help-text">1 or 2 pages.</small>
+                </div>
+            </div>
         </div>
 
-        <div class="form-group">
-            <label for="section_order">Section Display Order (comma-separated)</label>
-            <input type="text" id="section_order" name="section_order" value="{{ settings.section_order|join(', ') }}" class="form-input">
-            <small class="help-text">Available sections: summary, education, experience, projects, skills, certifications</small>
+        <!-- Section Order -->
+        <div class="card-section">
+            <div class="form-group">
+                <label for="section_order">Resume Section Order <span style="font-weight:400; color:var(--text-muted);">(comma-separated)</span></label>
+                <input type="text" id="section_order" name="section_order"
+                       value="{{ settings.section_order|join(', ') }}"
+                       class="form-input"
+                       placeholder="summary, education, experience, projects, skills, certifications">
+                <small class="help-text">Available sections: <code>summary, education, experience, projects, skills, certifications</code></small>
+            </div>
         </div>
 
-        <div class="form-group">
-            <label for="resume_length">Target Resume Page Length</label>
-            <input type="number" id="resume_length" name="resume_length" value="{{ settings.resume_length }}" min="1" max="2" class="form-input">
+        <!-- AI Tailoring Instructions -->
+        <div class="card-section">
+            <div class="form-group">
+                <label for="instructions">Custom AI Tailoring Instructions</label>
+                <textarea id="instructions" name="instructions" rows="5" class="form-textarea"
+                          placeholder="e.g. Prioritize backend projects over frontend ones. Emphasize Python and SQL. Keep the summary under 3 sentences.">{{ settings.instructions or '' }}</textarea>
+                <small class="help-text">Optional. Provide guidance to the AI when tailoring your resume. Factual integrity rules always take priority — the AI cannot invent skills or experience.</small>
+            </div>
         </div>
 
-        <div class="form-group">
-            <label for="instructions">Custom Tailoring Instructions for AI</label>
-            <textarea id="instructions" name="instructions" rows="3" class="form-textarea" placeholder="e.g. Prioritize backend projects over frontend ones.">{{ settings.instructions or '' }}</textarea>
-        </div>
-
+        <!-- Actions -->
         <div class="form-actions">
-            <button type="submit" class="btn btn-primary btn-large">Save Resume Settings</button>
-            <a href="{{ url_for('index') }}" class="btn btn-secondary">Back to Dashboard</a>
+            <button type="submit" class="btn btn-primary btn-lg">Save Resume Settings</button>
+            <a href="{{ url_for('index') }}" class="btn btn-secondary">← Back to Dashboard</a>
         </div>
     </form>
 </div>

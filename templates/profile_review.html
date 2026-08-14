@@ -1,51 +1,71 @@
 {% extends "base.html" %}
 
-{% block title %}Review Candidate Profile - Personal Job Automator{% endblock %}
+{% block title %}Candidate Profile — Job Automator{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h1>Candidate Profile Verification</h1>
-    <p>Review and correct the structured candidate details extracted from your Master CV. This profile is your <strong>factual source of truth</strong>.</p>
+    <h1>Candidate Profile</h1>
+    <p>Review your extracted information. This profile is the factual source of truth used when generating tailored resumes.</p>
 </div>
 
 <div class="card form-card">
     <form action="{{ url_for('profile') }}" method="POST">
-        <div class="form-row">
-            <div class="form-group flex-1">
-                <label for="name">Full Name</label>
-                <input type="text" id="name" name="name" value="{{ candidate.name if candidate else '' }}" required class="form-input">
-            </div>
 
-            <div class="form-group flex-1">
-                <label for="email">Email Address</label>
-                <input type="email" id="email" name="email" value="{{ candidate.email if candidate else '' }}" required class="form-input">
+        <!-- Contact Information -->
+        <div class="card-section">
+            <div class="card-section-label">Contact Information</div>
+            <div class="form-row">
+                <div class="form-group flex-1">
+                    <label for="name">Full Name</label>
+                    <input type="text" id="name" name="name"
+                           value="{{ candidate.name if candidate else '' }}"
+                           required class="form-input" placeholder="e.g. Omar Ahsan">
+                </div>
+                <div class="form-group flex-1">
+                    <label for="email">Email Address</label>
+                    <input type="email" id="email" name="email"
+                           value="{{ candidate.email if candidate else '' }}"
+                           required class="form-input" placeholder="you@example.com">
+                </div>
+                <div class="form-group flex-1">
+                    <label for="phone">Phone Number</label>
+                    <input type="text" id="phone" name="phone"
+                           value="{{ candidate.phone if candidate else '' }}"
+                           class="form-input" placeholder="+91 98765 43210">
+                </div>
             </div>
-
-            <div class="form-group flex-1">
-                <label for="phone">Phone Number</label>
-                <input type="text" id="phone" name="phone" value="{{ candidate.phone if candidate else '' }}" class="form-input">
+            <div class="form-row">
+                <div class="form-group flex-1">
+                    <label for="linkedin">LinkedIn Profile URL</label>
+                    <input type="url" id="linkedin" name="linkedin"
+                           value="{{ candidate.profile.links.linkedin if candidate and candidate.profile.links else '' }}"
+                           class="form-input" placeholder="https://linkedin.com/in/yourprofile">
+                </div>
+                <div class="form-group flex-1">
+                    <label for="github">GitHub Profile URL</label>
+                    <input type="url" id="github" name="github"
+                           value="{{ candidate.profile.links.github if candidate and candidate.profile.links else '' }}"
+                           class="form-input" placeholder="https://github.com/yourusername">
+                </div>
             </div>
         </div>
 
-        <div class="form-row">
-            <div class="form-group flex-1">
-                <label for="linkedin">LinkedIn Profile URL</label>
-                <input type="url" id="linkedin" name="linkedin" value="{{ candidate.profile.links.linkedin if candidate and candidate.profile.links else '' }}" class="form-input">
-            </div>
-
-            <div class="form-group flex-1">
-                <label for="github">GitHub Profile URL</label>
-                <input type="url" id="github" name="github" value="{{ candidate.profile.links.github if candidate and candidate.profile.links else '' }}" class="form-input">
+        <!-- Professional Information -->
+        <div class="card-section">
+            <div class="card-section-label">Professional Information</div>
+            <div class="form-group">
+                <label for="skills">Technical Skills <span style="font-weight:400; color: var(--text-muted);">(comma-separated)</span></label>
+                <input type="text" id="skills" name="skills"
+                       value="{{ candidate.profile.skills|join(', ') if candidate and candidate.profile.skills else '' }}"
+                       class="form-input"
+                       placeholder="Python, SQL, Flask, Machine Learning, React…">
+                <small class="help-text">List all skills extracted from your CV. These drive matching and ATS optimization.</small>
             </div>
         </div>
 
-        <div class="form-group">
-            <label for="skills">Technical Skills (comma-separated)</label>
-            <input type="text" id="skills" name="skills" value="{{ candidate.profile.skills|join(', ') if candidate and candidate.profile.skills else '' }}" class="form-input">
-        </div>
-
+        <!-- Actions -->
         <div class="form-actions">
-            <button type="submit" class="btn btn-primary btn-large">Save Profile</button>
+            <button type="submit" class="btn btn-primary btn-lg">Save Profile</button>
             <a href="{{ url_for('preferences_route') }}" class="btn btn-secondary">Next: Job Preferences →</a>
         </div>
     </form>

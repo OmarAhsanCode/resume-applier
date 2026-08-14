@@ -476,10 +476,10 @@ class TestWatchlistVerify(unittest.TestCase):
             "ats_slug": "specco",
             "careers_url": "https://www.specco.com/careers"
         }
-
-        res = company_discovery.verify_discovered_source(cand)
-        self.assertFalse(res["verified"])
-        self.assertEqual(res["verification_status"], "verification_failed")
+        with patch("sources.first_party_careers.discover_first_party_with_browser", return_value=([], None)):
+            res = company_discovery.verify_discovered_source(cand)
+            self.assertFalse(res["verified"])
+            self.assertEqual(res["verification_status"], "verification_failed")
 
     @patch("company_discovery.requests.post")
     @patch("company_discovery.test_careers_page_reachable")

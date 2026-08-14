@@ -358,12 +358,34 @@ def generate_resume_endpoint(job_id):
     ai_analysis = job.get("ai_analysis") or {}
 
     try:
+        import resume_optimizer
+
+        # Analyze requirements and match matrix
+        requirements = resume_optimizer.analyze_job_requirements(job)
+        match_matrix = resume_optimizer.match_candidate_to_job(profile, requirements)
+
         try:
-            tailored_res = ai.tailor_resume(profile, job, ai_analysis, settings)
+            tailored_res = ai.tailor_resume(
+                profile,
+                job,
+                {
+                    "matching_requirements": match_matrix["all_matched_skills"],
+                    "missing_preferred_skills": match_matrix["all_unsupported_skills"],
+                    "requirements_breakdown": requirements
+                },
+                settings
+            )
         except Exception as tail_err:
             logger.warning(f"AI resume tailoring failed: {tail_err}. Falling back to deterministic resume mock.")
             mock_res = ai._mock_tailor_resume(profile, job, ai_analysis, settings)
             tailored_res = ai.validate_tailored_resume(mock_res, profile)
+
+        # Factual Integrity Validation
+        _, _, tailored_res = resume_optimizer.validate_factual_integrity(tailored_res, profile)
+
+        # Compute Match Score & Details
+        match_data = resume_optimizer.calculate_resume_match_score(tailored_res, requirements, profile)
+        match_score = match_data.get("overall_score", 85.0)
 
         latex_code = resume.render_latex(tailored_res)
 
@@ -376,11 +398,23 @@ def generate_resume_endpoint(job_id):
         with open(tex_path, "w", encoding="utf-8") as f:
             f.write(latex_code)
 
+        # Compile PDF
+        pdf_ok = False
+        pdf_path = None
+        try:
+            pdf_ok, pdf_path, pdf_log = resume.compile_pdf(tex_path)
+            if not pdf_ok:
+                logger.info(f"PDF compilation skipped or unconfigured: {pdf_log}")
+        except Exception as pdf_err:
+            logger.info(f"PDF compilation error: {pdf_err}")
+
         database.update_job_resume(
             job_id=job['id'],
             resume_json=tailored_res,
             tex_path=tex_path,
-            status=job.get("status", "selected")
+            status=job.get("status", "selected"),
+            resume_score=match_score,
+            resume_match_details=match_data
         )
 
         base_url = os.getenv("LOCAL_BASE_URL", "http://localhost:5000")
@@ -394,6 +428,11 @@ def generate_resume_endpoint(job_id):
         return jsonify({
             "status": "success",
             "message": "Resume created successfully.",
+            "match_score": match_score,
+            "match_details": match_data,
+            "pdf_available": bool(pdf_ok and pdf_path and os.path.exists(pdf_path)),
+            "download_pdf_url": f"/jobs/{job['id']}/download-resume?format=pdf",
+            "download_tex_url": f"/jobs/{job['id']}/download-resume?format=tex",
             "view_url": f"/jobs/{job['id']}/view-resume",
             "download_url": f"/jobs/{job['id']}/download-resume"
         })
@@ -403,6 +442,22 @@ def generate_resume_endpoint(job_id):
         if "rate" in err_msg.lower() or "429" in err_msg:
             return jsonify({"status": "error", "message": "Resume generation is temporarily rate-limited. Please try again later."}), 429
         return jsonify({"status": "error", "message": "Resume generation failed. Please try again."}), 500
+
+@app.route("/jobs/<int:job_id>/resume-details")
+def resume_details(job_id):
+    job = database.get_job_by_id(job_id)
+    if not job:
+        return jsonify({"status": "error", "message": "Job not found."}), 404
+    details = job.get("resume_match_details") or {}
+    score = job.get("resume_score")
+    return jsonify({
+        "status": "success",
+        "job_id": job_id,
+        "company": job.get("company"),
+        "title": job.get("title"),
+        "resume_score": score,
+        "match_details": details
+    })
 
 @app.route("/jobs/<int:job_id>/view-resume")
 def view_resume(job_id):
@@ -431,7 +486,7 @@ def view_resume(job_id):
 
 @app.route("/jobs/<int:job_id>/download-resume")
 def download_resume(job_id):
-    from flask import send_file
+    from flask import send_file, request
     job = database.get_job_by_id(job_id)
     if not job:
         return "Job not found.", 404
@@ -442,18 +497,39 @@ def download_resume(job_id):
 
     # Path traversal protection
     resumes_dir = os.path.abspath("generated/resumes")
-    resolved_path = os.path.abspath(tex_path)
-    if not resolved_path.startswith(resumes_dir):
+    resolved_tex_path = os.path.abspath(tex_path)
+    if not resolved_tex_path.startswith(resumes_dir):
         return "Access denied: Invalid path.", 403
 
-    try:
-        sanitized_comp = resume.sanitize_filename(job.get("company", "Company"))
-        sanitized_title = resume.sanitize_filename(job.get("title", "Role"))
+    # Derive expected PDF path
+    base_name = os.path.splitext(resolved_tex_path)[0]
+    expected_pdf_path = f"{base_name}.pdf"
+    has_pdf = os.path.exists(expected_pdf_path) and os.path.getsize(expected_pdf_path) > 0
+
+    req_format = request.args.get("format", "").lower().strip()
+    sanitized_comp = resume.sanitize_filename(job.get("company", "Company"))
+    sanitized_title = resume.sanitize_filename(job.get("title", "Role"))
+
+    # Explicit format=tex
+    if req_format == "tex":
         download_name = f"{sanitized_comp}_{sanitized_title}_Resume.tex"
-        return send_file(resolved_path, as_attachment=True, download_name=download_name, mimetype="application/x-tex")
-    except Exception as e:
-        logger.error(f"Error downloading tex file: {e}")
-        return "Error downloading resume file.", 500
+        return send_file(resolved_tex_path, as_attachment=True, download_name=download_name, mimetype="application/x-tex")
+
+    # Explicit format=pdf
+    if req_format == "pdf":
+        if has_pdf:
+            download_name = f"{sanitized_comp}_{sanitized_title}_Resume.pdf"
+            return send_file(expected_pdf_path, as_attachment=True, download_name=download_name, mimetype="application/pdf")
+        else:
+            return "PDF resume not found or compilation was unavailable.", 404
+
+    # Default (no format param): prefer PDF if available, fallback to TeX
+    if has_pdf:
+        download_name = f"{sanitized_comp}_{sanitized_title}_Resume.pdf"
+        return send_file(expected_pdf_path, as_attachment=True, download_name=download_name, mimetype="application/pdf")
+    else:
+        download_name = f"{sanitized_comp}_{sanitized_title}_Resume.tex"
+        return send_file(resolved_tex_path, as_attachment=True, download_name=download_name, mimetype="application/x-tex")
 
 @app.route("/sync-sheets", methods=["POST"])
 def sync_sheets():

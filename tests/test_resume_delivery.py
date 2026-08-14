@@ -6,6 +6,7 @@ import shutil
 import database
 import app as flask_app
 import google_service
+import resume
 from sources.base import create_normalized_job
 
 class TestResumeDelivery(unittest.TestCase):
@@ -22,6 +23,8 @@ class TestResumeDelivery(unittest.TestCase):
         # Configure app testing client
         flask_app.app.testing = True
         self.client = flask_app.app.test_client()
+        self.resumes_dir = os.path.abspath("generated/resumes")
+        os.makedirs(self.resumes_dir, exist_ok=True)
         
         self.cand_profile = {
             "name": "Jane Doe",
@@ -152,12 +155,41 @@ class TestResumeDelivery(unittest.TestCase):
         with patch("database.get_candidate", return_value={"name": "Jane Doe", "profile": self.cand_profile}):
             self.client.post(f"/jobs/{job_id}/generate-resume")
 
-        # GET download-resume
+        # GET download-resume (when PDF not compiled, falls back to .tex)
         resp = self.client.get(f"/jobs/{job_id}/download-resume")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.mimetype, "application/x-tex")
         self.assertIn("attachment", resp.headers.get("Content-Disposition", ""))
         self.assertIn("Microsoft_DevOps_Engineer_Resume.tex", resp.headers.get("Content-Disposition", ""))
+
+        # GET download-resume?format=tex
+        resp_tex = self.client.get(f"/jobs/{job_id}/download-resume?format=tex")
+        self.assertEqual(resp_tex.status_code, 200)
+        self.assertEqual(resp_tex.mimetype, "application/x-tex")
+        self.assertIn("Microsoft_DevOps_Engineer_Resume.tex", resp_tex.headers.get("Content-Disposition", ""))
+
+        # GET download-resume?format=pdf (when PDF missing -> 404)
+        resp_pdf_missing = self.client.get(f"/jobs/{job_id}/download-resume?format=pdf")
+        self.assertEqual(resp_pdf_missing.status_code, 404)
+
+        # Create dummy PDF file to verify PDF serving
+        job = database.get_job_by_id(job_id, db_path=self.test_db)
+        tex_path = job.get("resume_tex_path")
+        pdf_path = os.path.splitext(tex_path)[0] + ".pdf"
+        with open(pdf_path, "wb") as f:
+            f.write(b"%PDF-1.4 dummy pdf content")
+
+        # GET download-resume (default prefers PDF when present)
+        resp_default_pdf = self.client.get(f"/jobs/{job_id}/download-resume")
+        self.assertEqual(resp_default_pdf.status_code, 200)
+        self.assertEqual(resp_default_pdf.mimetype, "application/pdf")
+        self.assertIn("Microsoft_DevOps_Engineer_Resume.pdf", resp_default_pdf.headers.get("Content-Disposition", ""))
+
+        # GET download-resume?format=pdf
+        resp_explicit_pdf = self.client.get(f"/jobs/{job_id}/download-resume?format=pdf")
+        self.assertEqual(resp_explicit_pdf.status_code, 200)
+        self.assertEqual(resp_explicit_pdf.mimetype, "application/pdf")
+        self.assertIn("Microsoft_DevOps_Engineer_Resume.pdf", resp_explicit_pdf.headers.get("Content-Disposition", ""))
 
     def test_4_missing_resume_returns_404(self):
         job_data = create_normalized_job(
@@ -251,6 +283,60 @@ class TestResumeDelivery(unittest.TestCase):
     def test_7_overleaf_route_is_removed(self):
         resp = self.client.get("/jobs/1/overleaf")
         self.assertEqual(resp.status_code, 404)
+
+    @patch("shutil.which", return_value="/usr/bin/pdflatex")
+    @patch("subprocess.run")
+    def test_8_compile_pdf_success(self, mock_run, mock_which):
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = "Output written on test.pdf"
+        mock_proc.stderr = ""
+        mock_run.return_value = mock_proc
+
+        tex_file = os.path.join(self.resumes_dir, "test_success.tex")
+        pdf_file = os.path.join(self.resumes_dir, "test_success.pdf")
+        aux_file = os.path.join(self.resumes_dir, "test_success.aux")
+        with open(tex_file, "w", encoding="utf-8") as f:
+            f.write(r"\documentclass{article}\begin{document}Hello\end{document}")
+        with open(pdf_file, "wb") as f:
+            f.write(b"%PDF-1.4 dummy")
+        with open(aux_file, "w", encoding="utf-8") as f:
+            f.write("aux data")
+
+        ok, path, msg = resume.compile_pdf(tex_file, output_dir=self.resumes_dir)
+        self.assertTrue(ok)
+        self.assertEqual(path, pdf_file)
+        self.assertFalse(os.path.exists(aux_file)) # Cleaned up
+
+    @patch("shutil.which", return_value=None)
+    @patch.dict(os.environ, {"PDFLATEX_PATH": ""})
+    def test_9_compile_pdf_pdflatex_unavailable(self, mock_which):
+        tex_file = os.path.join(self.resumes_dir, "test_unavail.tex")
+        with open(tex_file, "w", encoding="utf-8") as f:
+            f.write("test")
+
+        ok, path, msg = resume.compile_pdf(tex_file, output_dir=self.resumes_dir)
+        self.assertFalse(ok)
+        self.assertIsNone(path)
+        self.assertIn("not found", msg)
+
+    @patch("shutil.which", return_value="/usr/bin/pdflatex")
+    @patch("subprocess.run")
+    def test_10_compile_pdf_failure_handling(self, mock_run, mock_which):
+        mock_proc = MagicMock()
+        mock_proc.returncode = 1
+        mock_proc.stdout = "! Undefined control sequence."
+        mock_proc.stderr = ""
+        mock_run.return_value = mock_proc
+
+        tex_file = os.path.join(self.resumes_dir, "test_fail.tex")
+        with open(tex_file, "w", encoding="utf-8") as f:
+            f.write("bad tex")
+
+        ok, path, msg = resume.compile_pdf(tex_file, output_dir=self.resumes_dir)
+        self.assertFalse(ok)
+        self.assertIsNone(path)
+        self.assertIn("Undefined control sequence", msg)
 
 if __name__ == "__main__":
     unittest.main()

@@ -124,7 +124,20 @@
                     <td class="cell-center">
                         <span class="priority-pill" data-company="{{ comp.company|escape }}" data-priority="{{ comp.priority }}" data-enabled="{% if comp.enabled %}true{% else %}false{% endif %}" onclick="openEditCompanyModalFromEl(this)">{{ comp.priority }}</span>
                     </td>
-                    <td><span class="badge badge-info">{{ comp.source|capitalize }}</span></td>
+                    <td>
+                        <span class="badge badge-info">
+                            {% if comp.source == 'first_party' or comp.source_type == 'first_party' %}
+                                {% if 'amazon' in comp.company|lower %}Amazon Jobs
+                                {% elif 'google' in comp.company|lower %}Google Careers
+                                {% elif 'microsoft' in comp.company|lower %}Microsoft Careers
+                                {% else %}First-Party Careers{% endif %}
+                            {% elif comp.source %}
+                                {{ comp.source|capitalize }}
+                            {% else %}
+                                Unknown
+                            {% endif %}
+                        </span>
+                    </td>
                     <td class="cell-center">
                         <strong>
                             {% if comp.verification_status == 'unverified' %}
@@ -144,7 +157,7 @@
                     </td>
                     <td>
                         {% if comp.enabled %}
-                            {% if comp.verification_status in ('verified', 'verified_api', 'verified_html', 'verified_browser') or (comp.jobs_available is not none and comp.jobs_available > 0) %}
+                            {% if comp.verification_status in ('verified', 'verified_api', 'verified_html', 'verified_browser', 'verified_first_party') or (comp.jobs_available is not none and comp.jobs_available > 0) %}
                                 <span class="badge badge-success">✓ Active</span>
                             {% elif comp.verification_status == 'no_jobs_found' %}
                                 <span class="badge badge-warning">⚠ No Jobs</span>

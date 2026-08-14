@@ -1,85 +1,141 @@
 {% extends "base.html" %}
 
-{% block title %}Job Search Preferences - Personal Job Automator{% endblock %}
+{% block title %}Job Search Preferences — Job Automator{% endblock %}
 
 {% block content %}
 <div class="page-header">
     <h1>Job Search Preferences</h1>
-    <p>Specify the types of roles, locations, work modes, and dream companies you are looking for.</p>
+    <p>Tell the system what opportunities you're looking for. These preferences drive discovery, filtering, and ranking.</p>
 </div>
 
 <div class="card form-card">
     <form action="{{ url_for('preferences_route') }}" method="POST">
-        <div class="form-row">
-            <div class="form-group flex-1">
-                <label for="preferred_roles">Target Job Titles (one per line)</label>
-                <textarea id="preferred_roles" name="preferred_roles" rows="5" class="form-textarea">{{ preferences.preferred_roles|join('\n') if preferences else '' }}</textarea>
-            </div>
 
-            <div class="form-group flex-1">
-                <label for="locations">Target Locations (one per line)</label>
-                <textarea id="locations" name="locations" rows="5" class="form-textarea">{{ preferences.locations|join('\n') if preferences else '' }}</textarea>
-            </div>
-        </div>
-
-        <div class="form-row">
-            <div class="form-group flex-1">
-                <label>Work Modes</label>
-                <div class="checkbox-group">
-                    <label><input type="checkbox" name="work_modes" value="remote" {% if 'remote' in preferences.work_modes %}checked{% endif %}> Remote</label>
-                    <label><input type="checkbox" name="work_modes" value="hybrid" {% if 'hybrid' in preferences.work_modes %}checked{% endif %}> Hybrid</label>
-                    <label><input type="checkbox" name="work_modes" value="onsite" {% if 'onsite' in preferences.work_modes %}checked{% endif %}> On-site</label>
+        <!-- Target Roles + Locations -->
+        <div class="card-section">
+            <div class="form-row">
+                <div class="form-group flex-1">
+                    <label for="preferred_roles">Target Job Titles</label>
+                    <textarea id="preferred_roles" name="preferred_roles" rows="5" class="form-textarea"
+                              placeholder="Software Engineer&#10;Machine Learning Engineer&#10;Backend Developer">{{ preferences.preferred_roles|join('\n') if preferences else '' }}</textarea>
+                    <small class="help-text">One role per line.</small>
                 </div>
-            </div>
-
-            <div class="form-group flex-1">
-                <label>Experience Levels</label>
-                <div class="checkbox-group">
-                    <label><input type="checkbox" name="experience_levels" value="internship" {% if 'internship' in preferences.experience_levels %}checked{% endif %}> Internship</label>
-                    <label><input type="checkbox" name="experience_levels" value="entry_level" {% if 'entry_level' in preferences.experience_levels %}checked{% endif %}> Entry Level</label>
-                    <label><input type="checkbox" name="experience_levels" value="mid_level" {% if 'mid_level' in preferences.experience_levels %}checked{% endif %}> Mid Level</label>
+                <div class="form-group flex-1">
+                    <label for="locations">Target Locations</label>
+                    <textarea id="locations" name="locations" rows="5" class="form-textarea"
+                              placeholder="India&#10;Remote&#10;Bangalore">{{ preferences.locations|join('\n') if preferences else '' }}</textarea>
+                    <small class="help-text">One location per line.</small>
                 </div>
             </div>
         </div>
 
-        <div class="form-row">
-            <div class="form-group flex-1">
-                <label for="minimum_salary">Minimum Salary / Stipend (₹ per month)</label>
-                <input type="number" id="minimum_salary" name="minimum_salary" value="{{ preferences.minimum_salary if preferences and preferences.minimum_salary else '' }}" placeholder="e.g. 30000" class="form-input">
-            </div>
-
-            <div class="form-group flex-1" style="display: flex; align-items: flex-end; padding-bottom: 8px;">
-                <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox" name="include_undisclosed_salary" value="true" {% if not preferences or preferences.include_undisclosed_salary != False %}checked{% endif %}>
-                    <span>Include jobs where salary/stipend is not disclosed</span>
-                </label>
+        <!-- Work Mode + Experience Level -->
+        <div class="card-section">
+            <div class="form-row">
+                <div class="form-group flex-1">
+                    <label>Work Modes</label>
+                    <div class="checkbox-group">
+                        <label>
+                            <input type="checkbox" name="work_modes" value="remote"
+                                   {% if preferences and 'remote' in preferences.work_modes %}checked{% endif %}>
+                            Remote
+                        </label>
+                        <label>
+                            <input type="checkbox" name="work_modes" value="hybrid"
+                                   {% if preferences and 'hybrid' in preferences.work_modes %}checked{% endif %}>
+                            Hybrid
+                        </label>
+                        <label>
+                            <input type="checkbox" name="work_modes" value="onsite"
+                                   {% if preferences and 'onsite' in preferences.work_modes %}checked{% endif %}>
+                            On-site
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group flex-1">
+                    <label>Experience Levels</label>
+                    <div class="checkbox-group">
+                        <label>
+                            <input type="checkbox" name="experience_levels" value="internship"
+                                   {% if preferences and 'internship' in preferences.experience_levels %}checked{% endif %}>
+                            Internship
+                        </label>
+                        <label>
+                            <input type="checkbox" name="experience_levels" value="entry_level"
+                                   {% if preferences and 'entry_level' in preferences.experience_levels %}checked{% endif %}>
+                            Entry Level
+                        </label>
+                        <label>
+                            <input type="checkbox" name="experience_levels" value="mid_level"
+                                   {% if preferences and 'mid_level' in preferences.experience_levels %}checked{% endif %}>
+                            Mid Level
+                        </label>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div class="form-row">
-            <div class="form-group flex-1">
-                <label for="discovery_mode">Job Discovery Mode</label>
-                <select id="discovery_mode" name="discovery_mode" class="form-input">
-                    <option value="targeted_and_open" {% if not preferences or preferences.discovery_mode == 'targeted_and_open' %}selected{% endif %}>Target Companies + Open Discovery (Recommended)</option>
-                    <option value="targeted" {% if preferences and preferences.discovery_mode == 'targeted' %}selected{% endif %}>Target Companies Only</option>
-                    <option value="open_only" {% if preferences and preferences.discovery_mode == 'open_only' %}selected{% endif %}>Open Discovery Only (Adzuna)</option>
-                </select>
-            </div>
-
-            <div class="form-group flex-1">
-                <label for="jobs_per_run">Default Target Jobs Per Run</label>
-                <input type="number" id="jobs_per_run" name="jobs_per_run" value="{{ preferences.jobs_per_run if preferences else 50 }}" class="form-input">
-            </div>
-        </div>
-
-            <div class="form-group flex-1">
-                <label for="dream_companies">Dream / Preferred Companies (one per line)</label>
-                <textarea id="dream_companies" name="dream_companies" rows="4" class="form-textarea">{{ preferences.dream_companies|join('\n') if preferences else '' }}</textarea>
+        <!-- Compensation -->
+        <div class="card-section">
+            <div class="form-row">
+                <div class="form-group flex-1">
+                    <label for="minimum_salary">Minimum Salary / Stipend <span style="font-weight:400; color:var(--text-muted);">(₹ per month)</span></label>
+                    <input type="number" id="minimum_salary" name="minimum_salary"
+                           value="{{ preferences.minimum_salary if preferences and preferences.minimum_salary else '' }}"
+                           placeholder="e.g. 30000" class="form-input">
+                </div>
+                <div class="form-group flex-1" style="display: flex; align-items: flex-end; padding-bottom: 2px;">
+                    <label class="checkbox-label">
+                        <input type="checkbox" name="include_undisclosed_salary" value="true"
+                               {% if not preferences or preferences.include_undisclosed_salary != False %}checked{% endif %}>
+                        <span>Include jobs where salary / stipend is not disclosed</span>
+                    </label>
+                </div>
             </div>
         </div>
 
+        <!-- Discovery + Jobs Per Run -->
+        <div class="card-section">
+            <div class="form-row">
+                <div class="form-group flex-1">
+                    <label for="discovery_mode">Job Discovery Mode</label>
+                    <select id="discovery_mode" name="discovery_mode" class="form-input">
+                        <option value="targeted_and_open"
+                            {% if not preferences or preferences.discovery_mode == 'targeted_and_open' %}selected{% endif %}>
+                            Target Companies + Open Discovery (Recommended)
+                        </option>
+                        <option value="targeted"
+                            {% if preferences and preferences.discovery_mode == 'targeted' %}selected{% endif %}>
+                            Target Companies Only
+                        </option>
+                        <option value="open_only"
+                            {% if preferences and preferences.discovery_mode == 'open_only' %}selected{% endif %}>
+                            Open Discovery Only (Adzuna)
+                        </option>
+                    </select>
+                </div>
+                <div class="form-group" style="width: 160px; flex-shrink: 0;">
+                    <label for="jobs_per_run">Target Jobs Per Run</label>
+                    <input type="number" id="jobs_per_run" name="jobs_per_run"
+                           value="{{ preferences.jobs_per_run if preferences else 50 }}"
+                           min="1" max="200" class="form-input">
+                </div>
+            </div>
+        </div>
+
+        <!-- Dream Companies -->
+        <div class="card-section">
+            <div class="form-group">
+                <label for="dream_companies">Dream / Preferred Companies</label>
+                <textarea id="dream_companies" name="dream_companies" rows="4" class="form-textarea"
+                          placeholder="Google&#10;Stripe&#10;Notion">{{ preferences.dream_companies|join('\n') if preferences else '' }}</textarea>
+                <small class="help-text">One company per line. These companies get a priority boost in ranking.</small>
+            </div>
+        </div>
+
+        <!-- Actions -->
         <div class="form-actions">
-            <button type="submit" class="btn btn-primary btn-large">Save Preferences</button>
+            <button type="submit" class="btn btn-primary btn-lg">Save Preferences</button>
             <a href="{{ url_for('index') }}" class="btn btn-secondary">Go to Dashboard →</a>
         </div>
     </form>

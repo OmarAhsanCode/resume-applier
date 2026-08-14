@@ -1,7 +1,6 @@
 {
   "greenhouse": [
     "razorpay",
-    "browserstack",
     "freshworks",
     "chargebee",
     "cred",
@@ -18,7 +17,6 @@
   ],
   "lever": [
     "postman",
-    "swiggy",
     "zomato",
     "palantir",
     "spotify"

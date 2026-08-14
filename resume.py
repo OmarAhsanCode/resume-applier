@@ -277,6 +277,10 @@ def create_latex_template_file(template_path: str = "latex/resume_template.tex")
 def compile_pdf(tex_path: str, output_dir: str = "generated/resumes") -> Tuple[bool, Optional[str], str]:
     """
     Compiles a .tex file into a PDF using pdflatex.
+    Resolves pdflatex from:
+      1. os.getenv("PDFLATEX_PATH")
+      2. shutil.which("pdflatex")
+    Cleans up auxiliary files (.aux, .log, .out) upon compilation.
     Returns tuple: (success: bool, pdf_path: str or None, error_log: str).
     Never crashes the pipeline on pdflatex error.
     """
@@ -286,17 +290,32 @@ def compile_pdf(tex_path: str, output_dir: str = "generated/resumes") -> Tuple[b
     base_name = os.path.splitext(os.path.basename(tex_path))[0]
     expected_pdf = os.path.join(output_dir, f"{base_name}.pdf")
 
-    # Locate pdflatex command
-    cmd = shutil.which(PDFLATEX_PATH) or shutil.which("pdflatex")
+    # Locate pdflatex command dynamically
+    env_path = os.getenv("PDFLATEX_PATH")
+    cmd = None
+    if env_path and os.path.exists(env_path):
+        cmd = env_path
+    elif env_path and shutil.which(env_path):
+        cmd = shutil.which(env_path)
+    else:
+        cmd = shutil.which("pdflatex")
+
     if not cmd:
         err_msg = "pdflatex command not found on system PATH. .tex generated successfully."
         logger.warning(err_msg)
         return False, None, err_msg
 
     try:
-        # Run pdflatex twice for proper references layout
+        # Run pdflatex with safe security arguments and non-interactive mode
         process = subprocess.run(
-            [cmd, "-interaction=nonstopmode", f"-output-directory={os.path.abspath(output_dir)}", tex_path],
+            [
+                cmd,
+                "-interaction=nonstopmode",
+                "-halt-on-error",
+                "-no-shell-escape",
+                f"-output-directory={os.path.abspath(output_dir)}",
+                tex_path
+            ],
             cwd=tex_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -304,11 +323,20 @@ def compile_pdf(tex_path: str, output_dir: str = "generated/resumes") -> Tuple[b
             text=True
         )
         
+        # Clean up temporary LaTeX auxiliary files
+        for ext in [".aux", ".log", ".out"]:
+            aux_file = os.path.join(output_dir, f"{base_name}{ext}")
+            if os.path.exists(aux_file):
+                try:
+                    os.remove(aux_file)
+                except OSError:
+                    pass
+
         if process.returncode == 0 and os.path.exists(expected_pdf) and os.path.getsize(expected_pdf) > 0:
             return True, expected_pdf, "PDF compiled successfully."
         else:
             err_log = process.stdout or process.stderr or "pdflatex exit code non-zero."
-            logger.error(f"pdflatex compilation failed for {tex_path}: {err_log[:500]}")
+            logger.warning(f"pdflatex compilation non-zero for {tex_path}: {err_log[:300]}")
             return False, None, err_log
     except Exception as e:
         logger.error(f"Error executing pdflatex: {e}")

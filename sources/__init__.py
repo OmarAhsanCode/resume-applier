@@ -1,6 +1,6 @@
 import logging
 from typing import List, Dict, Any, Optional, Tuple, Callable
-from sources import greenhouse, lever, ashby, workday, smartrecruiters, taleo, icims, adzuna
+from sources import greenhouse, lever, ashby, workday, smartrecruiters, taleo, icims, adzuna, first_party_careers
 from sources.base import generate_open_discovery_queries
 
 logger = logging.getLogger(__name__)
@@ -12,6 +12,7 @@ SOURCES = [
     {"name": "ashby", "module": ashby, "enabled": True, "lane": "targeted"},
     {"name": "workday", "module": workday, "enabled": True, "lane": "targeted"},
     {"name": "smartrecruiters", "module": smartrecruiters, "enabled": True, "lane": "targeted"},
+    {"name": "first_party", "module": first_party_careers, "enabled": True, "lane": "targeted"},
     {"name": "taleo", "module": taleo, "enabled": False, "lane": "targeted"},
     {"name": "icims", "module": icims, "enabled": False, "lane": "targeted"},
     {"name": "adzuna", "module": adzuna, "enabled": True, "lane": "open"}

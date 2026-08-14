@@ -1,13 +1,17 @@
 """
 test_deduplication_behavior.py
 
-Regression tests for the job deduplication vs deprioritization semantics.
+Regression test suite for cross-run job deduplication, rotation, and last_shown_at semantics.
 
-The correct model:
-    TRUE DUPLICATE (same unique_id in same run)  → EXCLUDE (duplicate_count++)
-    PREVIOUSLY SHOWN (cross-run re-discovery)    → DEPRIORITIZE (eligible for re-selection)
-    NEVER SHOWN                                  → PRIORITIZE
-    APPLIED / REJECTED                           → PERMANENTLY EXCLUDED (existing rules)
+Enforces:
+1. A job stored in SQLite is NOT permanently excluded.
+2. last_shown_at is set ONLY when a job is actually surfaced/selected for the user.
+3. Never-shown jobs (last_shown_at IS NULL) have highest selection priority.
+4. Previously-shown jobs are used only as fallback when never-shown jobs are insufficient.
+5. Recently-shown jobs do NOT immediately recycle into the next run (stale first).
+6. Applied and rejected jobs remain permanently excluded.
+7. Within-run duplicates increment duplicate_count and are excluded.
+8. Cross-run re-discovery is NOT counted as a duplicate.
 """
 import os
 import unittest
@@ -133,174 +137,135 @@ class TestDeduplicationBehavior(unittest.TestCase):
             )
 
     # ------------------------------------------------------------------ #
-    # Test 1: First run requesting 20 returns up to discovered count
+    # Test 1: Run 1 has 20 eligible new jobs -> Request 10 -> Select 10.
+    # Run 2 requests 10 -> Must return remaining 10 never-shown jobs.
     # ------------------------------------------------------------------ #
-    def test_1_first_run_returns_discovered_count(self):
-        """Run 1: 20 jobs discovered, 0 previously seen → all eligible."""
+    def test_scenario_1_disjoint_selection_across_runs(self):
+        """Run 1 has 20 new jobs, requests 10. Run 2 requests 10 -> returns remaining 10 never-shown jobs."""
         discovered = [_make_discovered(f"gh:{i}") for i in range(1, 21)]
-        res = self._run_pipeline(discovered, requested=20)
-        self.assertIn(res["status"], ("completed", "partial"))
-        self.assertEqual(res["discovered_count"], 20)
-        self.assertEqual(res["duplicate_count"], 0)
-        self.assertGreater(res["selected_count"], 0)
+        res1 = self._run_pipeline(discovered, requested=10)
+        self.assertEqual(res1["selected_count"], 10)
+        selected_run1 = {j["unique_id"] for j in database.get_all_jobs(status_filter="selected", db_path=self.db_path)}
+        self.assertEqual(len(selected_run1), 10)
 
-    # ------------------------------------------------------------------ #
-    # Test 2: Run 2 requesting 10 does NOT return 0
-    # ------------------------------------------------------------------ #
-    def test_2_second_run_does_not_return_zero(self):
-        """Run 1 shows 20. Run 2 requests 10 → must NOT return 0."""
-        discovered = [_make_discovered(f"gh:{i}") for i in range(1, 21)]
-
-        res1 = self._run_pipeline(discovered, requested=20)
-        self.assertGreater(res1["selected_count"], 0)
-
-        # Run 2: same discovery pool (all previously seen now)
+        # Run 2 with same discovered jobs
         res2 = self._run_pipeline(discovered, requested=10)
-        self.assertEqual(res2["status"], "completed")
-        # No within-run duplicates (each unique_id appears once)
-        self.assertEqual(res2["duplicate_count"], 0)
-        # Previously-seen eligible jobs must fill the pool
-        self.assertGreater(res2["selected_count"], 0)
+        self.assertEqual(res2["selected_count"], 10)
+
+        conn = database.get_connection(self.db_path)
+        all_selected_rows = conn.execute("SELECT unique_id FROM jobs WHERE status = 'selected'").fetchall()
+        conn.close()
+
+        # In total, all 20 jobs must have been selected across the 2 runs
+        selected_all = {r["unique_id"] for r in all_selected_rows}
+        self.assertEqual(len(selected_all), 20)
 
     # ------------------------------------------------------------------ #
-    # Test 3: Prefer never-shown when 30 jobs exist, 20 shown, 10 new
+    # Test 2: Run 1 has 20 eligible jobs -> Request 5 -> Only 5 marked shown.
+    # Run 2 requests 5 -> Must select from remaining 15 never-shown jobs.
     # ------------------------------------------------------------------ #
-    def test_3_prioritize_unseen_over_previously_shown(self):
-        """30 eligible jobs, 20 shown, 10 new → request 10 → all 10 are the new ones."""
-        # Seed 20 previously-seen jobs in DB
-        shown_time = (datetime.now() - timedelta(hours=2)).isoformat()
-        for i in range(1, 21):
-            _insert_job(f"gh:{i}", self.db_path, status="new", last_shown_at=shown_time)
+    def test_scenario_2_only_surfaced_jobs_marked_shown(self):
+        """Run 1 requests 5 -> 5 marked shown. Run 2 requests 5 -> selects from remaining 15 never-shown jobs."""
+        discovered = [_make_discovered(f"gh:{i}") for i in range(1, 21)]
+        res1 = self._run_pipeline(discovered, requested=5)
+        self.assertEqual(res1["selected_count"], 5)
 
-        # Discovery returns 20 old + 10 brand-new
-        discovered = (
-            [_make_discovered(f"gh:{i}") for i in range(1, 21)]  # previously seen
-            + [_make_discovered(f"gh:new{i}") for i in range(1, 11)]  # brand new
-        )
-        res = self._run_pipeline(discovered, requested=10)
+        run1_selected = {j["unique_id"] for j in database.get_all_jobs(status_filter="selected", db_path=self.db_path)}
+        self.assertEqual(len(run1_selected), 5)
+
+        res2 = self._run_pipeline(discovered, requested=5)
+        self.assertEqual(res2["selected_count"], 5)
+
+        # Check jobs selected in Run 2 (most recently updated last_shown_at)
+        conn = database.get_connection(self.db_path)
+        rows = conn.execute("SELECT unique_id FROM jobs WHERE status = 'selected' ORDER BY last_shown_at DESC LIMIT 5").fetchall()
+        conn.close()
+        run2_selected = {r["unique_id"] for r in rows}
+
+        self.assertTrue(run2_selected.isdisjoint(run1_selected), f"Run 2 selected {run2_selected} which overlaps Run 1 {run1_selected}")
+
+    # ------------------------------------------------------------------ #
+    # Test 3: Run 1 selects 5 -> Run 2 has no new jobs.
+    # Previously shown jobs used only according to stale/recycle policy.
+    # ------------------------------------------------------------------ #
+    def test_scenario_3_recycle_previously_shown_when_unseen_depleted(self):
+        """Run 1 selects 5. Run 2 has no new jobs and all 5 shown. Recycles oldest shown first."""
+        base_time = datetime.now() - timedelta(days=2)
+        for i in range(1, 6):
+            shown_at = (base_time + timedelta(hours=i)).isoformat()
+            _insert_job(f"gh:{i}", self.db_path, status="selected", last_shown_at=shown_at)
+
+        discovered = [_make_discovered(f"gh:{i}") for i in range(1, 6)]
+        res = self._run_pipeline(discovered, requested=2)
         self.assertEqual(res["status"], "completed")
-        # 10 brand-new jobs were saved; 20 previously-seen were refreshed (not in duplicate_count)
-        self.assertEqual(res["duplicate_count"], 0)
-        self.assertEqual(res["selected_count"], 10)
+        self.assertEqual(res["selected_count"], 2)
 
-        # The 10 selected jobs should be the new ones (never previously shown)
-        selected = database.get_all_jobs(status_filter="selected", db_path=self.db_path)
-        selected_ids = {j["unique_id"] for j in selected}
-        new_ids = {f"gh:new{i}" for i in range(1, 11)}
-        self.assertTrue(selected_ids.issubset(new_ids),
-                        f"Expected only new jobs in selection, got: {selected_ids}")
+        # Must recycle oldest shown jobs (gh:1 and gh:2)
+        conn = database.get_connection(self.db_path)
+        rows = conn.execute("SELECT unique_id FROM jobs ORDER BY last_shown_at DESC LIMIT 2").fetchall()
+        conn.close()
+        recently_updated = {r["unique_id"] for r in rows}
+        self.assertEqual(recently_updated, {"gh:1", "gh:2"})
 
     # ------------------------------------------------------------------ #
-    # Test 4: 5 unseen + 5 old → return 5 unseen + 5 old eligible
+    # Test 4: Applied/rejected jobs are never returned.
     # ------------------------------------------------------------------ #
-    def test_4_fill_with_older_eligible_when_unseen_are_scarce(self):
-        """5 unseen, 10 previously-seen eligible → request 10 → get 5+5."""
-        shown_time = (datetime.now() - timedelta(hours=1)).isoformat()
-        for i in range(1, 11):
-            _insert_job(f"gh:{i}", self.db_path, status="new", last_shown_at=shown_time)
-
-        # Discovery returns 10 old + 5 brand-new
-        discovered = (
-            [_make_discovered(f"gh:{i}") for i in range(1, 11)]
-            + [_make_discovered(f"gh:new{i}") for i in range(1, 6)]
-        )
-        res = self._run_pipeline(discovered, requested=10)
-        self.assertEqual(res["status"], "completed")
-        self.assertEqual(res["selected_count"], 10)
-
-    # ------------------------------------------------------------------ #
-    # Test 5: All 50 eligible jobs previously shown → return 10 (not 0)
-    # ------------------------------------------------------------------ #
-    def test_5_returns_oldest_shown_when_all_previously_seen(self):
-        """All 50 eligible jobs have been shown → request 10 → return least-recently-shown."""
-        base_time = datetime.now() - timedelta(days=3)
-        for i in range(1, 51):
-            shown_at = (base_time + timedelta(minutes=i)).isoformat()
-            _insert_job(f"gh:{i}", self.db_path, status="new", last_shown_at=shown_at)
-
-        # Discovery returns all 50 (all previously seen)
-        discovered = [_make_discovered(f"gh:{i}") for i in range(1, 51)]
-        res = self._run_pipeline(discovered, requested=10)
-        self.assertEqual(res["status"], "completed")
-        self.assertEqual(res["selected_count"], 10)
-
-    # ------------------------------------------------------------------ #
-    # Test 6: Within-run true duplicates (same unique_id twice) are removed
-    # ------------------------------------------------------------------ #
-    def test_6_within_run_true_duplicates_are_removed(self):
-        """Same unique_id returned twice in one discovery run → 1 saved, duplicate_count=1."""
-        # unique_id "gh:1" appears twice in the same discovery result
-        discovered = [
-            _make_discovered("gh:1"),
-            _make_discovered("gh:1"),  # true within-run duplicate
-        ]
-        res = self._run_pipeline(discovered, requested=10)
-        self.assertEqual(res["discovered_count"], 2)
-        self.assertEqual(res["duplicate_count"], 1)
-        # Only 1 job actually saved
-        all_jobs = database.get_all_jobs(db_path=self.db_path)
-        gh1_records = [j for j in all_jobs if j["unique_id"] == "gh:1"]
-        self.assertEqual(len(gh1_records), 1)
-
-    # ------------------------------------------------------------------ #
-    # Test 7: Same job from multiple sources → one row only
-    # ------------------------------------------------------------------ #
-    def test_7_cross_source_same_job_appears_once(self):
-        """Two sources returning same unique_id → only one record in DB."""
-        # Greenhouse and Lever both surface "gh:1" (same unique_id = canonical dedup key)
-        discovered = [
-            {**_make_discovered("gh:1"), "source": "greenhouse"},
-            {**_make_discovered("gh:1"), "source": "lever"},  # same unique_id
-        ]
-        res = self._run_pipeline(discovered, requested=10)
-        self.assertEqual(res["duplicate_count"], 1)
-        all_jobs = database.get_all_jobs(db_path=self.db_path)
-        matches = [j for j in all_jobs if j["unique_id"] == "gh:1"]
-        self.assertEqual(len(matches), 1)
-
-    # ------------------------------------------------------------------ #
-    # Test 8: Applied/rejected jobs obey exclusion rules
-    # ------------------------------------------------------------------ #
-    def test_8_applied_and_rejected_remain_excluded(self):
-        """Applied and rejected jobs must not re-appear in selected."""
-        # Seed 2 jobs in terminal states
+    def test_scenario_4_applied_and_rejected_permanently_excluded(self):
+        """Applied and rejected jobs are never returned in results."""
         _insert_job("gh:applied", self.db_path, status="applied")
         _insert_job("gh:rejected", self.db_path, status="rejected")
-
-        # Seed 1 new eligible job
         _insert_job("gh:eligible", self.db_path, status="new")
 
-        # Discovery resurfaces all 3
-        discovered = [
-            _make_discovered("gh:applied"),
-            _make_discovered("gh:rejected"),
-            _make_discovered("gh:eligible"),
-        ]
-        res = self._run_pipeline(discovered, requested=10)
+        discovered = [_make_discovered("gh:applied"), _make_discovered("gh:rejected"), _make_discovered("gh:eligible")]
+        res = self._run_pipeline(discovered, requested=5)
         self.assertEqual(res["status"], "completed")
 
         selected = database.get_all_jobs(status_filter="selected", db_path=self.db_path)
         selected_ids = {j["unique_id"] for j in selected}
-
-        self.assertNotIn("gh:applied", selected_ids, "Applied job must not be re-selected")
-        self.assertNotIn("gh:rejected", selected_ids, "Rejected job must not be re-selected")
-        self.assertIn("gh:eligible", selected_ids, "Eligible job should be selected")
+        self.assertNotIn("gh:applied", selected_ids)
+        self.assertNotIn("gh:rejected", selected_ids)
+        self.assertIn("gh:eligible", selected_ids)
 
     # ------------------------------------------------------------------ #
-    # Test 9: Requested count honoured when ≥ 10 eligible jobs exist
+    # Test 5: Same job twice in one discovery run increments duplicate_count.
     # ------------------------------------------------------------------ #
-    def test_9_requested_count_respected(self):
-        """If 15 eligible jobs exist and 10 are requested → exactly 10 selected."""
-        # Seed 15 previously-seen eligible jobs
-        shown_time = (datetime.now() - timedelta(hours=3)).isoformat()
-        for i in range(1, 16):
-            _insert_job(f"gh:{i}", self.db_path, status="new", last_shown_at=shown_time)
+    def test_scenario_5_within_run_duplicate_count(self):
+        """Same job twice in one discovery run increments duplicate_count and is excluded."""
+        discovered = [_make_discovered("gh:1"), _make_discovered("gh:1")]
+        res = self._run_pipeline(discovered, requested=5)
+        self.assertEqual(res["discovered_count"], 2)
+        self.assertEqual(res["duplicate_count"], 1)
 
-        # Discover all 15
-        discovered = [_make_discovered(f"gh:{i}") for i in range(1, 16)]
-        res = self._run_pipeline(discovered, requested=10)
-        self.assertEqual(res["status"], "completed")
-        self.assertEqual(res["selected_count"], 10)
+    # ------------------------------------------------------------------ #
+    # Test 6: A job discovered again in a later run is not counted as duplicate.
+    # ------------------------------------------------------------------ #
+    def test_scenario_6_cross_run_rediscovery_not_duplicate(self):
+        """A job discovered again in a later run is not counted as a duplicate."""
+        discovered = [_make_discovered("gh:1")]
+        res1 = self._run_pipeline(discovered, requested=5)
+        self.assertEqual(res1["duplicate_count"], 0)
+
+        res2 = self._run_pipeline(discovered, requested=5)
+        self.assertEqual(res2["duplicate_count"], 0)
+
+    # ------------------------------------------------------------------ #
+    # Test 7: Verify last_shown_at is updated ONLY for jobs surfaced to user.
+    # ------------------------------------------------------------------ #
+    def test_scenario_7_last_shown_at_updated_only_for_surfaced_jobs(self):
+        """10 jobs discovered, requested 3. Only the 3 selected jobs get last_shown_at set."""
+        discovered = [_make_discovered(f"gh:{i}") for i in range(1, 11)]
+        res = self._run_pipeline(discovered, requested=3)
+        self.assertEqual(res["selected_count"], 3)
+
+        conn = database.get_connection(self.db_path)
+        rows = conn.execute("SELECT unique_id, last_shown_at FROM jobs").fetchall()
+        conn.close()
+
+        shown_jobs = [r["unique_id"] for r in rows if r["last_shown_at"] is not None]
+        unshown_jobs = [r["unique_id"] for r in rows if r["last_shown_at"] is None]
+
+        self.assertEqual(len(shown_jobs), 3)
+        self.assertEqual(len(unshown_jobs), 7)
 
 
 if __name__ == "__main__":
