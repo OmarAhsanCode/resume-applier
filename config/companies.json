@@ -261,5 +261,22 @@
     "jobs_found": 25,
     "jobs_available": 25,
     "jobs_retrieved": 25
+  },
+  {
+    "company": "Notion",
+    "careers_url": "https://www.notion.so/careers",
+    "official_company_url": "https://www.notion.so",
+    "category": "Targeted Watchlist",
+    "priority": 90,
+    "country": "United States",
+    "source": "ashby",
+    "source_identifier": "notion",
+    "enabled": true,
+    "verified": true,
+    "last_verified": "2026-08-14 16:34:22",
+    "verification_status": "verified_api",
+    "jobs_found": 128,
+    "jobs_available": 128,
+    "jobs_retrieved": 128
   }
 ]
