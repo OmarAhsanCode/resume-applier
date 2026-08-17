@@ -1,0 +1,44 @@
+# Git and local environment
+.git/
+.env
+.env.*
+!.env.example
+credentials.json
+token.json
+
+# Bytecode & Caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+venv/
+env/
+
+# Data and Generated Artifacts (persisted via volumes)
+data/
+generated/
+uploads/
+backups/
+scratch/
+tools/
+*.db
+*.sqlite3
+
+# LaTeX compilation logs
+*.aux
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+texput.log
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

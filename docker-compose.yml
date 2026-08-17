@@ -1,0 +1,45 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: resume_applier
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - APP_ENV=production
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_PATH=/app/data/jobs.db
+      - PDFLATEX_PATH=pdflatex
+      - AI_API_KEY=${AI_API_KEY}
+      - AI_BASE_URL=${AI_BASE_URL:-https://api.groq.com/openai/v1}
+      - AI_MODEL_NAME=${AI_MODEL_NAME:-llama-3.3-70b-versatile}
+      - SECOND_AI_API_KEY=${SECOND_AI_API_KEY}
+      - SECOND_AI_BASE_URL=${SECOND_AI_BASE_URL}
+      - SECOND_AI_MODEL_NAME=${SECOND_AI_MODEL_NAME}
+      - THIRD_AI_API_KEY=${THIRD_AI_API_KEY}
+      - THIRD_AI_BASE_URL=${THIRD_AI_BASE_URL}
+      - THIRD_AI_MODEL_NAME=${THIRD_AI_MODEL_NAME}
+      - RESUME_MAX_ITERATIONS=${RESUME_MAX_ITERATIONS:-5}
+      - GOOGLE_SHEETS_SPREADSHEET_ID=${GOOGLE_SHEETS_SPREADSHEET_ID}
+      - GOOGLE_DRIVE_FOLDER_ID=${GOOGLE_DRIVE_FOLDER_ID}
+    volumes:
+      - app_data:/app/data
+      - app_resumes:/app/generated/resumes
+      - app_uploads:/app/uploads
+      - app_config:/app/config
+      - app_backups:/app/backups
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  app_data:
+  app_resumes:
+  app_uploads:
+  app_config:
+  app_backups:

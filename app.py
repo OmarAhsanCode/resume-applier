@@ -1,28 +1,170 @@
 import os
 import threading
 import logging
+import uuid
+import time
+from collections import defaultdict
 from dotenv import load_dotenv
 load_dotenv()  # Must be first - loads .env before any module-level os.getenv() calls
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, g
+import config
 import database
 import resume
 import ai
 import jobs
 import company_manager
 import company_discovery
-import uuid
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+app_config = config.get_config()
+
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
-app.config["UPLOAD_FOLDER"] = "uploads"
+app.secret_key = app_config.SECRET_KEY
+app.config["UPLOAD_FOLDER"] = app_config.UPLOAD_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = app_config.MAX_CONTENT_LENGTH
+app.config["SESSION_COOKIE_HTTPONLY"] = app_config.SESSION_COOKIE_HTTPONLY
+app.config["SESSION_COOKIE_SAMESITE"] = app_config.SESSION_COOKIE_SAMESITE
+app.config["SESSION_COOKIE_SECURE"] = app_config.SESSION_COOKIE_SECURE
+
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 os.makedirs("data", exist_ok=True)
+os.makedirs(app_config.GENERATED_RESUMES_DIR, exist_ok=True)
 
 # Initialize database tables
 database.init_db()
+
+# Rate limiting data structure
+_rate_limit_lock = threading.Lock()
+_rate_limit_records = defaultdict(list)
+
+def is_rate_limited(client_ip: str, limit: int = 30, window_sec: int = 60) -> bool:
+    if not app_config.RATE_LIMIT_ENABLED:
+        return False
+    now = time.time()
+    with _rate_limit_lock:
+        timestamps = _rate_limit_records[client_ip]
+        # Keep only timestamps within window
+        _rate_limit_records[client_ip] = [ts for ts in timestamps if now - ts < window_sec]
+        if len(_rate_limit_records[client_ip]) >= limit:
+            return True
+        _rate_limit_records[client_ip].append(now)
+        return False
+
+# Request Correlation ID and Security Headers Middleware
+@app.before_request
+def handle_before_request():
+    req_id = request.headers.get("X-Request-ID")
+    if req_id and len(req_id) <= 64:
+        g.request_id = req_id.strip()
+    else:
+        g.request_id = str(uuid.uuid4())
+
+@app.after_request
+def handle_after_request(response):
+    req_id = getattr(g, "request_id", None)
+    if req_id:
+        response.headers["X-Request-ID"] = req_id
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+# Standard Error Handlers
+@app.errorhandler(400)
+def handle_bad_request(e):
+    if request.path.startswith("/jobs/") or request.path.startswith("/companies/") or request.path.startswith("/run"):
+        return jsonify({
+            "success": False,
+            "error": {
+                "code": "BAD_REQUEST",
+                "message": "Invalid request parameters or payload.",
+                "request_id": getattr(g, "request_id", None)
+            }
+        }), 400
+    return render_template("base.html"), 400
+
+@app.errorhandler(404)
+def handle_not_found(e):
+    if request.path.startswith("/jobs/") or request.path.startswith("/companies/") or request.path.startswith("/run"):
+        return jsonify({
+            "success": False,
+            "error": {
+                "code": "RESOURCE_NOT_FOUND",
+                "message": "The requested resource could not be found.",
+                "request_id": getattr(g, "request_id", None)
+            }
+        }), 404
+    return render_template("base.html"), 404
+
+@app.errorhandler(413)
+def handle_payload_too_large(e):
+    return jsonify({
+        "success": False,
+        "error": {
+            "code": "PAYLOAD_TOO_LARGE",
+            "message": "Request payload exceeds maximum allowed size.",
+            "request_id": getattr(g, "request_id", None)
+        }
+    }), 413
+
+@app.errorhandler(429)
+def handle_rate_limited(e):
+    return jsonify({
+        "success": False,
+        "error": {
+            "code": "RATE_LIMITED",
+            "message": "Too many requests. Please slow down and try again later.",
+            "request_id": getattr(g, "request_id", None)
+        }
+    }), 429
+
+@app.errorhandler(500)
+def handle_internal_error(e):
+    logger.error(f"Internal server error on request {getattr(g, 'request_id', 'unknown')}: {e}")
+    if request.path.startswith("/jobs/") or request.path.startswith("/companies/") or request.path.startswith("/run"):
+        return jsonify({
+            "success": False,
+            "error": {
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": "An unexpected error occurred. Please check application logs.",
+                "request_id": getattr(g, "request_id", None)
+            }
+        }), 500
+    return render_template("base.html"), 500
+
+# ---------------------------------------------------------------------------
+# Health & Readiness Endpoints
+# ---------------------------------------------------------------------------
+
+@app.route("/health", methods=["GET"])
+def health_liveness():
+    """Lightweight liveness probe."""
+    return jsonify({"status": "ok", "app_env": app_config.APP_ENV})
+
+@app.route("/health/ready", methods=["GET"])
+def health_readiness():
+    """Readiness probe checking database availability and configuration."""
+    db_ok = False
+    try:
+        conn = database.get_connection()
+        conn.execute("SELECT 1;").fetchone()
+        conn.close()
+        db_ok = True
+    except Exception as e:
+        logger.warning(f"Health readiness db check failed: {e}")
+
+    pdflatex_found = bool(resume.shutil.which(os.getenv("PDFLATEX_PATH", "pdflatex")))
+
+    all_ready = db_ok
+    status_code = 200 if all_ready else 503
+    return jsonify({
+        "status": "ready" if all_ready else "unready",
+        "database": "ok" if db_ok else "error",
+        "pdflatex_available": pdflatex_found,
+        "app_env": app_config.APP_ENV
+    }), status_code
 
 # In-memory background thread state for runs
 _active_run_lock = threading.Lock()
@@ -212,6 +354,10 @@ def resume_settings_route():
 
 @app.route("/run", methods=["POST"])
 def trigger_run():
+    client_ip = request.remote_addr or "127.0.0.1"
+    if is_rate_limited(client_ip, limit=10, window_sec=60):
+        return jsonify({"status": "error", "message": "Rate limit exceeded for run trigger. Please wait before triggering a new run."}), 429
+
     global _active_run_thread, _active_stop_requested, _active_run_id, _latest_progress
     
     candidate = database.get_candidate()
@@ -345,6 +491,10 @@ def mark_rejected(job_id):
 
 @app.route("/jobs/<int:job_id>/generate-resume", methods=["POST"])
 def generate_resume_endpoint(job_id):
+    client_ip = request.remote_addr or "127.0.0.1"
+    if is_rate_limited(client_ip, limit=20, window_sec=60):
+        return jsonify({"status": "error", "message": "Resume generation is temporarily rate-limited. Please try again later."}), 429
+
     job = database.get_job_by_id(job_id)
     if not job:
         return jsonify({"status": "error", "message": "Job not found."}), 404
@@ -688,6 +838,10 @@ _verify_all_state = {
 @app.route("/companies/verify-all", methods=["POST"])
 def verify_all_route():
     """Starts async verification for all enabled companies in the watchlist."""
+    client_ip = request.remote_addr or "127.0.0.1"
+    if is_rate_limited(client_ip, limit=5, window_sec=60):
+        return jsonify({"status": "error", "message": "Batch verification is temporarily rate-limited. Please wait before triggering again."}), 429
+
     global _verify_all_state
     
     with _verify_all_lock:
@@ -794,7 +948,7 @@ def delete_company_route():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
-    debug_mode = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+    port = app_config.PORT
+    debug_mode = app_config.DEBUG
     # use_reloader=False prevents watchdog from killing active background search threads mid-run
     app.run(host="0.0.0.0", port=port, debug=debug_mode, use_reloader=False)

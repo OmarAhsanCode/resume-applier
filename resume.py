@@ -35,11 +35,20 @@ def latex_escape(text: Any) -> str:
     r"""
     Escapes all LaTeX special characters in user/AI-provided text.
     Handles: &, %, $, #, _, {, }, \, ^, ~
+    Also strips dangerous macro prefixes (\input, \write18, \openin, \openout, \include, \catcode, \def, \let).
     """
     if text is None:
         return ""
     if not isinstance(text, str):
         text = str(text)
+
+    # Neutralize dangerous TeX macro invocations
+    dangerous_macros = [
+        r"\write18", r"\input", r"\include", r"\openin", r"\openout",
+        r"\catcode", r"\def", r"\let", r"\csname", r"\endcsname"
+    ]
+    for macro in dangerous_macros:
+        text = re.sub(re.escape(macro), "", text, flags=re.IGNORECASE)
 
     # Replace backslash first to prevent escaping replacement backslashes
     text = text.replace('\\', r'\textbackslash{}')
@@ -63,9 +72,15 @@ def latex_escape(text: Any) -> str:
     return text
 
 def sanitize_filename(name: str) -> str:
-    """Sanitizes company/job title string for safe filesystem paths."""
-    clean = re.sub(r'[\s/\\:\*\?"<>\|]+', '_', name)
-    return clean.strip('_')[:60]
+    """Sanitizes company/job title string for safe filesystem paths without nulls, slashes, or traversal."""
+    if not name:
+        return "file"
+    # Remove null bytes and control characters
+    clean = re.sub(r'[\x00-\x1f\x7f]', '', str(name))
+    # Replace dangerous path separators and special characters with underscore
+    clean = re.sub(r'[\s/\\:\*\?"<>\|\.]+', '_', clean)
+    clean = clean.strip('_')[:60]
+    return clean if clean else "file"
 
 def render_latex(resume_json: Dict[str, Any], template_path: str = "latex/resume_template.tex") -> str:
     """Populates the LaTeX template using escaped fields from structured Resume JSON."""
@@ -306,7 +321,7 @@ def compile_pdf(tex_path: str, output_dir: str = "generated/resumes") -> Tuple[b
         return False, None, err_msg
 
     try:
-        # Run pdflatex with safe security arguments and non-interactive mode
+        timeout_sec = int(os.getenv("PDFLATEX_TIMEOUT", 30))
         process = subprocess.run(
             [
                 cmd,
@@ -319,12 +334,12 @@ def compile_pdf(tex_path: str, output_dir: str = "generated/resumes") -> Tuple[b
             cwd=tex_dir,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=30,
+            timeout=timeout_sec,
             text=True
         )
         
         # Clean up temporary LaTeX auxiliary files
-        for ext in [".aux", ".log", ".out"]:
+        for ext in [".aux", ".log", ".out", ".fls", ".fdb_latexmk"]:
             aux_file = os.path.join(output_dir, f"{base_name}{ext}")
             if os.path.exists(aux_file):
                 try:
@@ -335,8 +350,9 @@ def compile_pdf(tex_path: str, output_dir: str = "generated/resumes") -> Tuple[b
         if process.returncode == 0 and os.path.exists(expected_pdf) and os.path.getsize(expected_pdf) > 0:
             return True, expected_pdf, "PDF compiled successfully."
         else:
-            err_log = process.stdout or process.stderr or "pdflatex exit code non-zero."
-            logger.warning(f"pdflatex compilation non-zero for {tex_path}: {err_log[:300]}")
+            raw_err = process.stdout or process.stderr or "pdflatex exit code non-zero."
+            err_log = str(raw_err)[:500]
+            logger.warning(f"pdflatex compilation non-zero for {tex_path}: {err_log}")
             return False, None, err_log
     except Exception as e:
         logger.error(f"Error executing pdflatex: {e}")

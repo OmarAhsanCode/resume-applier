@@ -8,13 +8,21 @@ from typing import Dict, Any, List, Optional
 DB_PATH = os.getenv("DATABASE_PATH", "data/jobs.db")
 
 def get_connection(db_path: str = None) -> sqlite3.Connection:
-    """Connects to SQLite database and returns a connection with Row factory."""
+    """Connects to SQLite database and returns a connection with Row factory, WAL mode, and busy timeout."""
     target_path = db_path or DB_PATH
-    dir_name = os.path.dirname(target_path)
-    if dir_name:
-        os.makedirs(dir_name, exist_ok=True)
-    conn = sqlite3.connect(target_path)
+    if target_path != ":memory:":
+        dir_name = os.path.dirname(target_path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
+    conn = sqlite3.connect(target_path, timeout=10.0)
     conn.row_factory = sqlite3.Row
+    if target_path != ":memory:":
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA busy_timeout=5000;")
+            conn.execute("PRAGMA foreign_keys=ON;")
+        except Exception:
+            pass
     return conn
 
 def init_db(db_path: str = None) -> None:

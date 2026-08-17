@@ -2760,50 +2760,72 @@ Build in this order:
 
 19. Lever integration
 20. Ashby integration
-21. Common job schema
-22. Error handling
+21. SmartRecruiters and Workday integration
+22. Generic first-party discovery & Playwright fallback
+23. Company Watchlist verification engine
+24. Common job schema & error handling
 
 ### Phase 6 --- Filtering and Ranking
 
-23. Hard filters
-24. Deterministic scoring
-25. Sorting
-26. Candidate pool selection
+25. Hard filters (conservative, high-recall)
+26. Deterministic scoring
+27. Sorting & dream company weighting
+28. Candidate pool selection
 
-### Phase 7 --- AI Job Analysis
+### Phase 7 --- AI Job Analysis & Multi-Provider Router
 
-27. Hosted model integration
-28. Structured JSON output
-29. JSON validation
-30. Retry handling
-31. AI score integration
+29. Multi-provider OpenAI-compatible AI Router (Primary, Secondary, Tertiary)
+30. Rate-limit backoff & auth cooldown
+31. Structured JSON output & validation
+32. Retry handling & deterministic mock fallbacks
+33. AI score integration
 
-### Phase 8 --- Resume Generation
+### Phase 8 --- Resume Generation & ATS Optimization
 
-32. Resume JSON schema
-33. Resume tailoring prompt
-34. LaTeX template
-35. LaTeX escaping
-36. PDF generation
-37. PDF validation
+34. Resume JSON schema
+35. ATS keyword match scoring & iterative tailoring
+36. Strict factual-integrity validation (anti-hallucination)
+37. LaTeX template & dangerous macro stripping (`\write18`, `\input`, etc.)
+38. LaTeX special character escaping
+39. pdflatex PDF compilation with timeout and `-no-shell-escape`
+40. PDF validation & auxiliary file cleanup
 
-### Phase 9 --- Google
+### Phase 9 --- Google Integration
 
-38. Google authentication
-39. Drive upload
-40. Sheets creation/update
-41. Store links
+41. Google authentication
+42. Sheets creation/update
+43. Store official job & resume links
 
-### Phase 10 --- Final Workflow
+### Phase 10 --- Final Workflow & Web UI
 
-42. Background run
-43. Progress polling
-44. Result page
-45. Error reporting
-46. Mark Applied/Saved/Rejected
-47. Full end-to-end testing
+44. Background search thread
+45. Real-time progress polling
+46. Result page with match score breakdowns
+47. Mark Applied/Saved/Rejected
+48. Watchlist management & live verification UI
 
-Only after this should additional features be considered.
+### Phase 11 --- Production Hardening & Operations (COMPLETED)
+
+49. **Centralized Configuration**: `config.py` with `DevelopmentConfig`, `TestingConfig`, and `ProductionConfig`. Strict `SECRET_KEY` validation on production startup.
+50. **Database Production Hardening**: SQLite configured with `PRAGMA journal_mode=WAL;`, `PRAGMA busy_timeout=5000;`, and `PRAGMA foreign_keys=ON;`.
+51. **Online Non-Blocking Database Backup**: `scripts/backup_db.py` utilizing `sqlite3.Connection.backup()`.
+52. **Security & Request Hardening**:
+    - Request correlation IDs (`X-Request-ID` middleware).
+    - Standard security headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`).
+    - Payload size bounds (`MAX_CONTENT_LENGTH = 16MB`) and secure cookie attributes (`HttpOnly`, `SameSite=Lax`, `Secure`).
+    - In-memory rate limiting on expensive routes (`/run`, `/jobs/<id>/generate-resume`, `/companies/verify-all`).
+    - Sanitized JSON error handlers (400, 404, 413, 429, 500) preventing stack trace or credential leakage.
+    - Strict path traversal protection on file view/download endpoints.
+53. **Health & Observability Probes**: `GET /health` (liveness) and `GET /health/ready` (readiness).
+54. **Production Server & Containerization**:
+    - `Gunicorn` WSGI server configuration (`-w 1 --threads 4` for thread-safe in-memory background state).
+    - Production `Dockerfile` with TeX Live (`pdflatex`), Playwright Chromium, and non-root `appuser`.
+    - `docker-compose.yml` with persistent volume mounts (`data/`, `generated/resumes/`, `uploads/`, `config/`, `backups/`).
+55. **Operations & Verification**:
+    - `docs/OPERATIONS.md` (Runbook for backup, restore, secret rotation, incident response).
+    - `docs/PRODUCTION_CHECKLIST.md` (Security, database, AI, and deployment checklist).
+    - `scripts/production_smoke_test.py` (Automated production smoke test runner).
+    - Complete regression suite passing 311/311 tests.
 
 ------------------------------------------------------------------------
 
@@ -2812,22 +2834,23 @@ Only after this should additional features be considered.
 V1 is complete when you can do this:
 
 ``` text
-1. Open localhost.
+1. Open application dashboard (local or containerized Gunicorn).
 2. Upload your master CV once.
 3. Review extracted profile.
 4. Save it.
 5. Set job preferences once.
 6. Click "Find 50 Jobs".
-7. Wait.
-8. Receive 50 ranked new job opportunities.
-9. Receive tailored PDF resumes.
-10. Find those PDFs in Google Drive.
-11. Find every job and link in Google Sheets.
-12. Click the official application link.
-13. Apply manually.
-14. Mark the job as Applied.
-15. Run the application again tomorrow.
-16. Receive a fresh set without previously stored jobs.
+7. Wait while background thread executes discovery across ATS and career sources.
+8. Receive ranked new job opportunities with deduplication.
+9. Receive tailored, factual LaTeX-generated PDF resumes with ATS match scores.
+10. Download PDF / TeX resumes securely or open Overleaf redirect links.
+11. Sync job records and application links to Google Sheets.
+12. Click official application links to apply manually.
+13. Mark jobs as Applied, Saved, or Rejected.
+14. Run the application again tomorrow without receiving duplicate records.
+15. Perform non-blocking online database backups safely.
+16. Monitor service health via /health and /health/ready probes.
 ```
 
-If those 16 steps work reliably, **V1 is finished.**
+If those steps work reliably and securely, **V1 is finished and production-ready.**
+

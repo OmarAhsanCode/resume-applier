@@ -1,79 +1,89 @@
-# Personal Job Automation System — V1
+# Personal Job Automation System — Production Ready
 
-A personal, single-user job-search automation system built with **Python**, **Flask**, **SQLite**, **Requests / BeautifulSoup**, **Hosted Open-Source AI**, **LaTeX (`pdflatex`)**, and **Google Sheets API**.
+A personal, single-user job-search automation and ATS resume tailoring system built with **Python**, **Flask**, **SQLite**, **Requests / BeautifulSoup**, **Playwright**, **Hosted Open-Source AI**, **LaTeX (`pdflatex`)**, and **Google Sheets API**.
 
 ---
 
 ## Key Features
 
 1. **One-Time Master CV Upload**: Extract structured candidate profile factual data from PDF.
-2. **Job Discovery**: Discovers job postings across permitted public ATS feeds (Greenhouse, Lever, Ashby).
-3. **Stable ID Deduplication**: Deduplicates using stable source IDs (`source:source_job_id` or `source:normalized_url`) stored in local SQLite database (`data/jobs.db`).
-4. **Conservative Hard Filtering**: Retains high-recall opportunities. Hard-filters only obvious profession/experience mismatches (never hard-filters missing skills).
-5. **Deterministic Ranking**: Scores jobs from 0–100 using weighted rules (Role 35%, Location 25%, Experience 20%, Employment Type 10%, Skill Overlap 10%, Dream Company Bonus +5 to +10 pts).
-6. **Hosted Open-Source AI Analysis**: Evaluates top candidate pool for semantic match recommendations. `final_score = deterministic_score * 0.60 + ai_score * 0.40`.
-7. **LaTeX Resume Tailoring**: Customizes bullet points and summaries using candidate truthfulness rules, escaping special characters, and compiling to single-page PDF resumes or exporting to Overleaf.
-8. **Google Integration**: Syncs application dashboard to Google Sheets with custom Overleaf LaTeX compiler links.
+2. **Multi-Source Job Discovery**: Discovers job postings across direct ATS APIs (Greenhouse, Lever, Ashby, SmartRecruiters, Workday), first-party career pages, and Playwright Chromium headless fallback.
+3. **Company Watchlist Management**: Dynamic watchlist with priority scoring and real-time endpoint verification.
+4. **Stable ID Deduplication**: Deduplicates using stable source IDs (`source:source_job_id` or `source:normalized_url`) stored in persistent SQLite database (`data/jobs.db`).
+5. **Conservative Hard Filtering**: Retains high-recall opportunities. Hard-filters only obvious profession/experience mismatches (never hard-filters missing skills).
+6. **Deterministic Ranking**: Scores jobs from 0–100 using weighted rules (Role 35%, Location 25%, Experience 20%, Employment Type 10%, Skill Overlap 10%, Dream Company Bonus +5 to +10 pts).
+7. **Hosted Multi-Provider AI Router**: Automatically evaluates jobs and tailors resumes with primary, secondary, and tertiary fallback.
+8. **LaTeX Resume Tailoring & ATS Scoring**: Customizes bullet points with strict factual integrity rules, LaTeX macro security escaping, ATS keyword matching, and compiling to single-page PDF resumes or Overleaf export.
+9. **Google Sheets Sync**: Syncs application dashboard to Google Sheets with custom Overleaf LaTeX compiler links.
+10. **Production Hardened**: Built-in Gunicorn WSGI server, SQLite WAL mode, rate limiting, request correlation IDs, security headers, online database backup, and Docker containerization.
 
 ---
 
-## Installation & Setup
+## Quick Start (Docker Deployment)
+
+### 1. Configure Environment
+```bash
+cp .env.example .env
+# Edit .env and supply your SECRET_KEY, AI_API_KEY, and optional Google credentials
+```
+
+### 2. Build and Start Container
+```bash
+docker compose up -d --build
+```
+
+### 3. Check Health
+```bash
+curl http://localhost:8000/health
+# {"status": "ok", "app_env": "production"}
+```
+Access the dashboard at `http://localhost:8000`.
+
+---
+
+## Local Development Setup
 
 ### 1. Prerequisites
 - Python 3.10+
-- Git
-- `pdflatex` (optional, for PDF compilation; if missing, system generates `.tex` files and logs gracefully).
+- `pdflatex` (TeX Live / MacTeX / MiKTeX)
+- Playwright Chromium (`playwright install chromium`)
 
-### 2. Install Python Dependencies
+### 2. Install Dependencies
 ```bash
-python -m pip install -r requirements.txt
+pip install -r requirements.txt
+playwright install chromium
 ```
 
-### 3. Environment Variables
-Copy `.env.example` to `.env` and configure settings:
-```bash
-cp .env.example .env
-```
-
-Configured `.env` options:
-- `AI_API_KEY`: API key for hosted open-source AI model (e.g. Groq, Together AI, OpenRouter, Gemini OpenAI compatibility layer).
-- `AI_BASE_URL`: Base URL (default: `https://api.groq.com/openai/v1`).
-- `AI_MODEL_NAME`: Model family (e.g. `llama-3.3-70b-versatile`, `qwen-2.5-72b`).
-- `PDFLATEX_PATH`: Path to `pdflatex` binary if not on PATH.
-- `LOCAL_BASE_URL`: Local URL of Flask app (default: `http://localhost:5000`).
-- `GOOGLE_CREDENTIALS_FILE`: Path to `credentials.json`.
-- `GOOGLE_SHEETS_SPREADSHEET_ID`: Google Spreadsheet ID for application sync.
-
----
-
-## How to Run
-
-### Start the Flask Web Application
+### 3. Start Development Server
 ```bash
 python app.py
 ```
-Open your browser at `http://localhost:5000`.
-
-### Workflow
-1. Navigate to **Upload CV** (`/setup`) and upload your Master CV PDF.
-2. Review and verify your candidate details on **Profile** (`/profile`).
-3. Set your target roles, locations, and dream companies on **Preferences** (`/preferences`).
-4. Click **FIND JOBS** on the **Dashboard** (`/`).
-5. Track real-time progress as jobs are discovered, deduplicated, ranked, and tailored.
-6. View ranked recommendations, generated resumes, and apply links on **Results** (`/results`).
+Open `http://localhost:5000`.
 
 ---
 
 ## Running Tests
 
-Run the complete test suite:
+Run the complete 311+ test suite:
 ```bash
 python -m unittest discover tests
 ```
 
-Individual test modules:
-- Database: `python -m unittest tests/test_database.py`
-- AI Module: `python -m unittest tests/test_ai.py`
-- Job Discovery: `python -m unittest tests/test_sources.py`
-- Pipeline & Scoring: `python -m unittest tests/test_pipeline.py`
-- End-to-End Workflow: `python -m unittest tests/test_e2e.py`
+Run the production smoke test:
+```bash
+python scripts/production_smoke_test.py
+```
+
+Run database online backup:
+```bash
+python scripts/backup_db.py backups/
+```
+
+---
+
+## Operations & Production Architecture
+
+See:
+- [docs/OPERATIONS.md](docs/OPERATIONS.md) - Operations runbook, backup/restore procedures, secret rotation, incident response.
+- [docs/PRODUCTION_CHECKLIST.md](docs/PRODUCTION_CHECKLIST.md) - Comprehensive security, data integrity, and deployment checklist.
+- [PRODUCTION_AUDIT.md](PRODUCTION_AUDIT.md) - Complete architectural audit and risk assessment.

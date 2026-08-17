@@ -595,12 +595,16 @@ def tailor_resume_pipeline(
     job_dict: Dict[str, Any],
     ai_analysis: Optional[Dict[str, Any]] = None,
     resume_settings: Optional[Dict[str, Any]] = None,
-    max_iterations: int = 2
+    max_iterations: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Executes the complete V1.6 production-grade resume tailoring pipeline.
     """
     import ai
+
+    if max_iterations is None:
+        max_iterations = int(os.getenv("RESUME_MAX_ITERATIONS", 2))
+    max_iterations = min(max(1, max_iterations), 5)
 
     ai_analysis = ai_analysis or {}
     resume_settings = resume_settings or {}
